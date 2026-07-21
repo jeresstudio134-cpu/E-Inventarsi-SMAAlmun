@@ -1,0 +1,6 @@
+{
+  "name": "E-Inventaris & Peminjaman Barang",
+  "description": "Sistem e-inventaris dan peminjaman barang berbasis full-stack dengan CRUD, autentikasi pengguna, ekspor Excel/CSV untuk laporan, dan dukungan database Neon PostgreSQL.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
