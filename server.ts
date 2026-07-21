@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 import {
   initDb,
   getDbInfo,
@@ -477,6 +476,7 @@ async function startServer() {
   await initDb();
 
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
