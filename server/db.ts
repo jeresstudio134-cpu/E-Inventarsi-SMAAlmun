@@ -159,6 +159,27 @@ function writeLocalDb(data: LocalJsonDb) {
   fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(data, null, 2));
 }
 
+let isInitialized = false;
+let initializingPromise: Promise<void> | null = null;
+
+export async function ensureDb() {
+  if (!isPostgres) return;
+  if (isInitialized) return;
+
+  if (!initializingPromise) {
+    console.log('🔄 Lazy-initializing database tables in serverless instance...');
+    initializingPromise = initDb().then(() => {
+      isInitialized = true;
+      console.log('✅ Lazy-initialization of database tables completed!');
+    }).catch(err => {
+      console.error("❌ Lazy-initialization failed:", err);
+      initializingPromise = null;
+      throw err;
+    });
+  }
+  return initializingPromise;
+}
+
 // Initialize connection and tables
 export async function initDb() {
   if (isPostgres) {
@@ -275,6 +296,7 @@ export function getDbInfo() {
 
 // 2. USER ACTIONS
 export async function getUsers(): Promise<User[]> {
+  await ensureDb();
   if (isPostgres && pool) {
     const res = await pool.query('SELECT id, username, nama_lengkap, role, created_at FROM users ORDER BY id ASC');
     return res.rows;
@@ -285,6 +307,7 @@ export async function getUsers(): Promise<User[]> {
 }
 
 export async function getUserByUsername(username: string): Promise<any> {
+  await ensureDb();
   if (isPostgres && pool) {
     const res = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
     return res.rows[0] || null;
@@ -295,6 +318,7 @@ export async function getUserByUsername(username: string): Promise<any> {
 }
 
 export async function createUser(userData: Omit<User, 'id'> & { password?: string }): Promise<User> {
+  await ensureDb();
   const hash = hashPassword(userData.password || '123456');
   if (isPostgres && pool) {
     const res = await pool.query(
@@ -324,6 +348,7 @@ export async function createUser(userData: Omit<User, 'id'> & { password?: strin
 }
 
 export async function updateUser(id: number, userData: Partial<User> & { password?: string }): Promise<User> {
+  await ensureDb();
   if (isPostgres && pool) {
     let query = 'UPDATE users SET username = $1, nama_lengkap = $2, role = $3';
     const params: any[] = [userData.username, userData.nama_lengkap, userData.role];
@@ -362,6 +387,7 @@ export async function updateUser(id: number, userData: Partial<User> & { passwor
 }
 
 export async function deleteUser(id: number): Promise<boolean> {
+  await ensureDb();
   if (isPostgres && pool) {
     await pool.query('DELETE FROM users WHERE id = $1', [id]);
     return true;
@@ -376,6 +402,7 @@ export async function deleteUser(id: number): Promise<boolean> {
 
 // 3. BARANG (ITEMS) ACTIONS
 export async function getBarang(): Promise<Barang[]> {
+  await ensureDb();
   if (isPostgres && pool) {
     const res = await pool.query('SELECT * FROM barang ORDER BY id DESC');
     return res.rows;
@@ -387,6 +414,7 @@ export async function getBarang(): Promise<Barang[]> {
 }
 
 export async function createBarang(b: Omit<Barang, 'id'>): Promise<Barang> {
+  await ensureDb();
   if (isPostgres && pool) {
     const res = await pool.query(
       'INSERT INTO barang (nama, kode, kategori, stok_total, stok_tersedia, lokasi, deskripsi, image_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
@@ -418,6 +446,7 @@ export async function createBarang(b: Omit<Barang, 'id'>): Promise<Barang> {
 }
 
 export async function updateBarang(id: number, b: Partial<Barang>): Promise<Barang> {
+  await ensureDb();
   if (isPostgres && pool) {
     // We must handle stok adjustment carefully
     // Calculate new stok_tersedia based on change in total stock
@@ -472,6 +501,7 @@ export async function updateBarang(id: number, b: Partial<Barang>): Promise<Bara
 }
 
 export async function deleteBarang(id: number): Promise<boolean> {
+  await ensureDb();
   if (isPostgres && pool) {
     await pool.query('DELETE FROM barang WHERE id = $1', [id]);
     return true;
@@ -488,6 +518,7 @@ export async function deleteBarang(id: number): Promise<boolean> {
 
 // 4. PEMINJAMAN (BORROWING) ACTIONS
 export async function getPeminjaman(): Promise<Peminjaman[]> {
+  await ensureDb();
   if (isPostgres && pool) {
     const res = await pool.query(`
       SELECT p.*, b.nama as barang_nama, b.kode as barang_kode
@@ -516,6 +547,7 @@ export async function getPeminjaman(): Promise<Peminjaman[]> {
 }
 
 export async function createPeminjaman(p: Omit<Peminjaman, 'id'>): Promise<Peminjaman> {
+  await ensureDb();
   if (isPostgres && pool) {
     // Transaction to safely check and update stock
     const client = await pool.connect();
@@ -592,6 +624,7 @@ export async function createPeminjaman(p: Omit<Peminjaman, 'id'>): Promise<Pemin
 }
 
 export async function updatePeminjaman(id: number, p: Partial<Peminjaman>): Promise<Peminjaman> {
+  await ensureDb();
   if (isPostgres && pool) {
     const client = await pool.connect();
     try {
@@ -702,6 +735,7 @@ export async function updatePeminjaman(id: number, p: Partial<Peminjaman>): Prom
 }
 
 export async function deletePeminjaman(id: number): Promise<boolean> {
+  await ensureDb();
   if (isPostgres && pool) {
     // If deleted transaction was active, restore stock
     const client = await pool.connect();
