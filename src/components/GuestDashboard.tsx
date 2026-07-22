@@ -192,7 +192,7 @@ export default function GuestDashboard({ onLoginClick, isLoggedIn, onBackToAdmin
                 className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-slate-950 font-extrabold rounded-xl text-xs sm:text-sm transition shadow-lg shadow-teal-500/20 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
-                <span>Form Booking / Sewa Kamera & Alat</span>
+                <span>Form Booking / Sewa Alat</span>
               </button>
             </div>
           </div>
