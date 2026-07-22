@@ -158,7 +158,7 @@ export default function CetakBuktiA6Modal({ borrow, borrowData, isOpen, onClose 
               <div className="text-center border-b-2 border-slate-900 pb-2 mb-2">
                 <h4 className="font-extrabold text-[13px] tracking-wider text-slate-900 uppercase">SMA AL MUNAWWARIYYAH</h4>
                 <p className="text-[10px] font-bold text-slate-700 tracking-tight uppercase">E-INVENTARIS & SEWA ALAT MULTIMEDIA</p>
-                <p className="text-[8px] text-slate-500">Jl. Raya Sudimoro No. 1, Bululawang, Malang, Jawa Timur</p>
+                <p className="text-[8px] text-slate-500">Jl. Raya Sudimoro No. 9, Bululawang, Malang, Jawa Timur</p>
               </div>
 
               {/* Title & Status */}
