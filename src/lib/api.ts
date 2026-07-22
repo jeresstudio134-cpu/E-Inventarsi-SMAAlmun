@@ -129,6 +129,14 @@ export const api = {
     });
   },
 
+  // Public Booking
+  async createPublicBooking(data: Omit<Peminjaman, 'id' | 'status'> & { status?: string }): Promise<Peminjaman> {
+    return apiFetch('/api/public/booking', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  },
+
   // Peminjaman CRUD
   async getPeminjaman(): Promise<Peminjaman[]> {
     return apiFetch('/api/peminjaman');

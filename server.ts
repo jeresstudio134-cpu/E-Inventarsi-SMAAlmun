@@ -247,20 +247,44 @@ app.get('/api/peminjaman', authMiddleware, async (req, res) => {
 
 app.post('/api/peminjaman', authMiddleware, async (req, res) => {
   try {
-    const { nama_peminjam, kontak_peminjam, barang_id, jumlah, tanggal_pinjam, tanggal_kembali, catatan } = req.body;
+    const { 
+      nama_peminjam, 
+      kontak_peminjam, 
+      akun_medsos, 
+      alamat_domisili, 
+      barang_id, 
+      jumlah, 
+      tanggal_pinjam, 
+      tanggal_kembali, 
+      jam_mulai, 
+      jam_selesai, 
+      jaminan, 
+      keperluan_acara, 
+      status, 
+      catatan 
+    } = req.body;
+
     if (!nama_peminjam || !kontak_peminjam || !barang_id || !jumlah || !tanggal_pinjam || !tanggal_kembali) {
       return res.status(400).json({ error: 'Mohon lengkapi seluruh field transaksi peminjaman.' });
     }
+
     const trx = await createPeminjaman({
       nama_peminjam,
       kontak_peminjam,
+      akun_medsos: akun_medsos || '',
+      alamat_domisili: alamat_domisili || '',
       barang_id: parseInt(barang_id, 10),
       jumlah: parseInt(jumlah, 10),
       tanggal_pinjam,
       tanggal_kembali,
-      status: 'Dipinjam',
+      jam_mulai: jam_mulai || '',
+      jam_selesai: jam_selesai || '',
+      jaminan: jaminan || '',
+      keperluan_acara: keperluan_acara || '',
+      status: status || 'Dipinjam',
       catatan: catatan || ''
     });
+
     res.status(201).json(trx);
   } catch (error: any) {
     res.status(400).json({ error: error.message });
@@ -270,19 +294,87 @@ app.post('/api/peminjaman', authMiddleware, async (req, res) => {
 app.put('/api/peminjaman/:id', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const { nama_peminjam, kontak_peminjam, barang_id, jumlah, tanggal_pinjam, tanggal_kembali, status, catatan } = req.body;
+    const { 
+      nama_peminjam, 
+      kontak_peminjam, 
+      akun_medsos, 
+      alamat_domisili, 
+      barang_id, 
+      jumlah, 
+      tanggal_pinjam, 
+      tanggal_kembali, 
+      jam_mulai, 
+      jam_selesai, 
+      jaminan, 
+      keperluan_acara, 
+      status, 
+      catatan 
+    } = req.body;
+
     const updateData: any = {};
     if (nama_peminjam !== undefined) updateData.nama_peminjam = nama_peminjam;
     if (kontak_peminjam !== undefined) updateData.kontak_peminjam = kontak_peminjam;
+    if (akun_medsos !== undefined) updateData.akun_medsos = akun_medsos;
+    if (alamat_domisili !== undefined) updateData.alamat_domisili = alamat_domisili;
     if (barang_id !== undefined) updateData.barang_id = parseInt(barang_id, 10);
     if (jumlah !== undefined) updateData.jumlah = parseInt(jumlah, 10);
     if (tanggal_pinjam !== undefined) updateData.tanggal_pinjam = tanggal_pinjam;
     if (tanggal_kembali !== undefined) updateData.tanggal_kembali = tanggal_kembali;
+    if (jam_mulai !== undefined) updateData.jam_mulai = jam_mulai;
+    if (jam_selesai !== undefined) updateData.jam_selesai = jam_selesai;
+    if (jaminan !== undefined) updateData.jaminan = jaminan;
+    if (keperluan_acara !== undefined) updateData.keperluan_acara = keperluan_acara;
     if (status !== undefined) updateData.status = status;
     if (catatan !== undefined) updateData.catatan = catatan;
 
     const trx = await updatePeminjaman(id, updateData);
     res.json(trx);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// PUBLIC BOOKING ROUTE FOR VISITORS
+app.post('/api/public/booking', async (req, res) => {
+  try {
+    const { 
+      nama_peminjam, 
+      kontak_peminjam, 
+      akun_medsos, 
+      alamat_domisili, 
+      barang_id, 
+      jumlah, 
+      tanggal_pinjam, 
+      tanggal_kembali, 
+      jam_mulai, 
+      jam_selesai, 
+      jaminan, 
+      keperluan_acara, 
+      catatan 
+    } = req.body;
+
+    if (!nama_peminjam || !kontak_peminjam || !barang_id || !jumlah || !tanggal_pinjam || !tanggal_kembali) {
+      return res.status(400).json({ error: 'Mohon lengkapi seluruh field wajib (*).' });
+    }
+
+    const trx = await createPeminjaman({
+      nama_peminjam,
+      kontak_peminjam,
+      akun_medsos: akun_medsos || '',
+      alamat_domisili: alamat_domisili || '',
+      barang_id: parseInt(barang_id, 10),
+      jumlah: parseInt(jumlah, 10),
+      tanggal_pinjam,
+      tanggal_kembali,
+      jam_mulai: jam_mulai || '',
+      jam_selesai: jam_selesai || '',
+      jaminan: jaminan || '',
+      keperluan_acara: keperluan_acara || '',
+      status: 'Booking',
+      catatan: catatan || ''
+    });
+
+    res.status(201).json(trx);
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }

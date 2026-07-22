@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, Filter, AlertCircle, Calendar, User as UserIcon, Phone, FileText, CheckCircle, RefreshCw, X } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Filter, AlertCircle, Calendar, User as UserIcon, Phone, FileText, CheckCircle, RefreshCw, X, Printer, Share2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { Peminjaman, Barang, User } from '../types.js';
 import ExportButton from './ExportButton.js';
+import CetakBuktiA6Modal from './CetakBuktiA6Modal.js';
 
 interface PeminjamanManagementProps {
   user: User;
@@ -19,21 +20,31 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState<'All' | 'Dipinjam' | 'Dikembalikan' | 'Terlambat'>('All');
+  const [selectedStatus, setSelectedStatus] = useState<'All' | 'Booking' | 'Dipinjam' | 'Dikembalikan' | 'Terlambat'>('All');
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [selectedBorrow, setSelectedBorrow] = useState<Peminjaman | null>(null);
 
+  // Print A6 Receipt State
+  const [printBorrowItem, setPrintBorrowItem] = useState<Peminjaman | null>(null);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+
   // Form State
   const [formNamaPeminjam, setFormNamaPeminjam] = useState('');
+  const [formAkunMedsos, setFormAkunMedsos] = useState('');
   const [formKontakPeminjam, setFormKontakPeminjam] = useState('');
+  const [formAlamatDomisili, setFormAlamatDomisili] = useState('');
   const [formBarangId, setFormBarangId] = useState<number>(0);
   const [formJumlah, setFormJumlah] = useState<number>(1);
   const [formTanggalPinjam, setFormTanggalPinjam] = useState('');
+  const [formJamMulai, setFormJamMulai] = useState('08:00');
   const [formTanggalKembali, setFormTanggalKembali] = useState('');
-  const [formStatus, setFormStatus] = useState<'Dipinjam' | 'Dikembalikan' | 'Terlambat'>('Dipinjam');
+  const [formJamSelesai, setFormJamSelesai] = useState('17:00');
+  const [formJaminan, setFormJaminan] = useState('KTP & SIM A');
+  const [formKeperluanAcara, setFormKeperluanAcara] = useState('');
+  const [formStatus, setFormStatus] = useState<'Booking' | 'Dipinjam' | 'Dikembalikan' | 'Terlambat' | 'Batal'>('Dipinjam');
   const [formCatatan, setFormCatatan] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -70,22 +81,28 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
     setModalMode('create');
     setSelectedBorrow(null);
     setFormNamaPeminjam('');
+    setFormAkunMedsos('');
     setFormKontakPeminjam('');
+    setFormAlamatDomisili('');
     
     // Choose first available item as default if any
     const availableItems = items.filter(i => i.stok_tersedia > 0);
-    setFormBarangId(availableItems.length > 0 ? availableItems[0].id : 0);
+    setFormBarangId(availableItems.length > 0 ? availableItems[0].id : (items.length > 0 ? items[0].id : 0));
     
     setFormJumlah(1);
     
-    // Default dates
+    // Default dates & time
     const today = new Date().toISOString().split('T')[0];
     setFormTanggalPinjam(today);
+    setFormJamMulai('08:00');
     
     const threeDaysLater = new Date();
     threeDaysLater.setDate(threeDaysLater.getDate() + 3);
     setFormTanggalKembali(threeDaysLater.toISOString().split('T')[0]);
+    setFormJamSelesai('17:00');
     
+    setFormJaminan('KTP & SIM A');
+    setFormKeperluanAcara('');
     setFormStatus('Dipinjam');
     setFormCatatan('');
     setFormError(null);
@@ -96,11 +113,17 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
     setModalMode('edit');
     setSelectedBorrow(borrow);
     setFormNamaPeminjam(borrow.nama_peminjam);
+    setFormAkunMedsos(borrow.akun_medsos || '');
     setFormKontakPeminjam(borrow.kontak_peminjam);
+    setFormAlamatDomisili(borrow.alamat_domisili || '');
     setFormBarangId(borrow.barang_id);
     setFormJumlah(borrow.jumlah);
     setFormTanggalPinjam(borrow.tanggal_pinjam);
+    setFormJamMulai(borrow.jam_mulai || '08:00');
     setFormTanggalKembali(borrow.tanggal_kembali);
+    setFormJamSelesai(borrow.jam_selesai || '17:00');
+    setFormJaminan(borrow.jaminan || 'KTP & SIM A');
+    setFormKeperluanAcara(borrow.keperluan_acara || '');
     setFormStatus(borrow.status);
     setFormCatatan(borrow.catatan || '');
     setFormError(null);
@@ -159,10 +182,16 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
     const payload = {
       nama_peminjam: formNamaPeminjam,
       kontak_peminjam: formKontakPeminjam,
+      akun_medsos: formAkunMedsos,
+      alamat_domisili: formAlamatDomisili,
       barang_id: formBarangId,
       jumlah: formJumlah,
       tanggal_pinjam: formTanggalPinjam,
       tanggal_kembali: formTanggalKembali,
+      jam_mulai: formJamMulai,
+      jam_selesai: formJamSelesai,
+      jaminan: formJaminan,
+      keperluan_acara: formKeperluanAcara,
       status: formStatus,
       catatan: formCatatan
     };
@@ -278,7 +307,7 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
             Status:
           </span>
           <div className="flex gap-1.5">
-            {['All', 'Dipinjam', 'Dikembalikan', 'Terlambat'].map(status => (
+            {['All', 'Booking', 'Dipinjam', 'Dikembalikan', 'Terlambat'].map(status => (
               <button
                 id={`filter-status-${status}`}
                 key={status}
@@ -352,11 +381,13 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
                     <td className="px-6 py-4 text-slate-500 font-mono text-xs">{b.tanggal_kembali}</td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold leading-none ${
-                        b.status === 'Dipinjam'
-                          ? 'bg-amber-50 text-amber-700 border border-amber-100'
+                        b.status === 'Booking'
+                          ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                          : b.status === 'Dipinjam'
+                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
                           : b.status === 'Dikembalikan'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                          : 'bg-rose-50 text-rose-700 border border-rose-100'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-rose-50 text-rose-700 border border-rose-200'
                       }`}>
                         {b.status}
                       </span>
@@ -366,11 +397,22 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        {(b.status === 'Dipinjam' || b.status === 'Terlambat') && (
+                        <button
+                          onClick={() => {
+                            setPrintBorrowItem(b);
+                            setIsPrintModalOpen(true);
+                          }}
+                          className="p-1.5 border border-slate-200 hover:bg-slate-100 text-slate-700 hover:text-slate-900 rounded-lg transition"
+                          title="Cetak Bukti A6"
+                        >
+                          <Printer className="w-4 h-4 text-blue-600" />
+                        </button>
+
+                        {(b.status === 'Booking' || b.status === 'Dipinjam' || b.status === 'Terlambat') && (
                           <button
                             id={`btn-kembali-cepat-${b.id}`}
                             onClick={() => handleQuickReturn(b)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-100 rounded-lg text-xs font-bold transition"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold transition"
                             title="Proses Pengembalian Instan"
                           >
                             <CheckCircle className="w-3.5 h-3.5" />
@@ -452,32 +494,45 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
                 )}
 
                 {/* Card footer actions */}
-                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
-                  {(b.status === 'Dipinjam' || b.status === 'Terlambat') && (
-                    <button
-                      onClick={() => handleQuickReturn(b)}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-500 rounded-lg text-xs font-semibold transition"
-                    >
-                      <CheckCircle className="w-3.5 h-3.5" />
-                      <span>Kembalikan</span>
-                    </button>
-                  )}
+                <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100">
                   <button
-                    onClick={() => openEditModal(b)}
-                    className="p-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-slate-600"
-                    title="Ubah"
+                    onClick={() => {
+                      setPrintBorrowItem(b);
+                      setIsPrintModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition cursor-pointer"
                   >
-                    <Edit2 className="w-3.5 h-3.5" />
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Cetak Bukti</span>
                   </button>
-                  {user.role === 'Admin' && (
+
+                  <div className="flex items-center gap-1.5">
+                    {(b.status === 'Booking' || b.status === 'Dipinjam' || b.status === 'Terlambat') && (
+                      <button
+                        onClick={() => handleQuickReturn(b)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-500 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      >
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        <span>Kembalikan</span>
+                      </button>
+                    )}
                     <button
-                      onClick={() => handleDelete(b.id)}
-                      className="p-1.5 border border-rose-100 hover:bg-rose-50 rounded-lg text-rose-500"
-                      title="Hapus"
+                      onClick={() => openEditModal(b)}
+                      className="p-1.5 border border-slate-200 hover:bg-slate-50 rounded-xl text-slate-600 cursor-pointer"
+                      title="Ubah Rincian"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Edit2 className="w-3.5 h-3.5" />
                     </button>
-                  )}
+                    {user.role === 'Admin' && (
+                      <button
+                        onClick={() => handleDelete(b.id)}
+                        className="p-1.5 border border-rose-100 hover:bg-rose-50 rounded-xl text-rose-500 cursor-pointer"
+                        title="Hapus Log"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -515,59 +570,78 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
                 </div>
               )}
 
-              {/* Nama Peminjam */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Nama Peminjam (Siswa/Pegawai) *
-                </label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                    <UserIcon className="w-4 h-4" />
-                  </span>
+              {/* Nama Peminjam & Medsos */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Nama Peminjam *
+                  </label>
                   <input
                     id="form-pinjam-peminjam"
                     type="text"
                     value={formNamaPeminjam}
                     onChange={(e) => setFormNamaPeminjam(e.target.value)}
-                    placeholder="Contoh: Budi Santoso"
-                    className="w-full pl-9 pr-4 py-2 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl text-sm outline-none transition"
+                    placeholder="Contoh: Ahmad Rizky"
+                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Akun Medsos (IG/TikTok)
+                  </label>
+                  <input
+                    type="text"
+                    value={formAkunMedsos}
+                    onChange={(e) => setFormAkunMedsos(e.target.value)}
+                    placeholder="Contoh: @ahmad_rizky"
+                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition"
                   />
                 </div>
               </div>
 
-              {/* No Kontak */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                  No. Kontak / WA Peminjam *
-                </label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                    <Phone className="w-4 h-4" />
-                  </span>
+              {/* No Kontak & Alamat */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    No. WA / HP Aktif *
+                  </label>
                   <input
                     id="form-pinjam-kontak"
                     type="text"
                     value={formKontakPeminjam}
                     onChange={(e) => setFormKontakPeminjam(e.target.value)}
                     placeholder="Contoh: 081234567890"
-                    className="w-full pl-9 pr-4 py-2 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl text-sm outline-none transition"
+                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Alamat Domisili / Shareloc
+                  </label>
+                  <input
+                    type="text"
+                    value={formAlamatDomisili}
+                    onChange={(e) => setFormAlamatDomisili(e.target.value)}
+                    placeholder="Contoh: Bululawang"
+                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition"
                   />
                 </div>
               </div>
 
               {/* Barang Selection & Jumlah */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {/* Barang Dropdown */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                    Pilih Barang *
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Pilih Barang / Alat *
                   </label>
                   <select
                     id="form-pinjam-barang-id"
                     value={formBarangId}
                     onChange={(e) => setFormBarangId(parseInt(e.target.value, 10))}
-                    disabled={modalMode === 'edit'} // Lock item during edits for simpler inventory tracking
-                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-sm outline-none transition disabled:bg-slate-50 disabled:text-slate-400"
+                    disabled={modalMode === 'edit'}
+                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition disabled:bg-slate-50 disabled:text-slate-400"
                   >
                     <option value={0} disabled>-- Pilih Barang --</option>
                     {items.map(i => {
@@ -585,9 +659,8 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
                   </select>
                 </div>
 
-                {/* Jumlah Pinjam */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
                     Jumlah Unit *
                   </label>
                   <input
@@ -596,60 +669,101 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
                     min="1"
                     value={formJumlah}
                     onChange={(e) => setFormJumlah(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="w-full px-4 py-2 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl text-sm outline-none transition"
+                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition font-bold"
                   />
                 </div>
               </div>
 
-              {/* Tanggal Pinjam & Kembali */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Tgl Pinjam */}
+              {/* Tanggal & Jam Pinjam / Kembali */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                    Tanggal Pinjam *
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Mulai Sewa (Tgl & Jam) *
+                  </label>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="date"
+                      value={formTanggalPinjam}
+                      onChange={(e) => setFormTanggalPinjam(e.target.value)}
+                      className="w-2/3 px-2 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition"
+                    />
+                    <input
+                      type="time"
+                      value={formJamMulai}
+                      onChange={(e) => setFormJamMulai(e.target.value)}
+                      className="w-1/3 px-1 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition text-center font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Selesai Sewa (Tgl & Jam) *
+                  </label>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="date"
+                      value={formTanggalKembali}
+                      onChange={(e) => setFormTanggalKembali(e.target.value)}
+                      className="w-2/3 px-2 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition"
+                    />
+                    <input
+                      type="time"
+                      value={formJamSelesai}
+                      onChange={(e) => setFormJamSelesai(e.target.value)}
+                      className="w-1/3 px-1 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition text-center font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Jaminan & Keperluan */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Jaminan Sewa (Min. 2 Identitas)
                   </label>
                   <input
-                    id="form-pinjam-tgl-pinjam"
-                    type="date"
-                    value={formTanggalPinjam}
-                    onChange={(e) => setFormTanggalPinjam(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl text-sm outline-none transition"
+                    type="text"
+                    value={formJaminan}
+                    onChange={(e) => setFormJaminan(e.target.value)}
+                    placeholder="Contoh: KTP & SIM A"
+                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition"
                   />
                 </div>
 
-                {/* Tgl Kembali */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                    Tenggat Pengembalian *
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Keperluan Acara
                   </label>
                   <input
-                    id="form-pinjam-tgl-kembali"
-                    type="date"
-                    value={formTanggalKembali}
-                    onChange={(e) => setFormTanggalKembali(e.target.value)}
-                    className="w-full px-4 py-2 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl text-sm outline-none transition"
+                    type="text"
+                    value={formKeperluanAcara}
+                    onChange={(e) => setFormKeperluanAcara(e.target.value)}
+                    placeholder="Contoh: Dokumentasi Pentas Seni"
+                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition"
                   />
                 </div>
               </div>
 
-              {/* Status Selector (Only visible during EDIT mode) */}
-              {modalMode === 'edit' && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
-                    Status Transaksi *
-                  </label>
-                  <select
-                    id="form-pinjam-status"
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value as any)}
-                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-sm outline-none transition"
-                  >
-                    <option value="Dipinjam">Dipinjam (Aktif)</option>
-                    <option value="Dikembalikan">Dikembalikan (Selesai)</option>
-                    <option value="Terlambat">Terlambat (Denda/Teguran)</option>
-                  </select>
-                </div>
-              )}
+              {/* Status Selector */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                  Status Transaksi *
+                </label>
+                <select
+                  id="form-pinjam-status"
+                  value={formStatus}
+                  onChange={(e) => setFormStatus(e.target.value as any)}
+                  className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition font-semibold"
+                >
+                  <option value="Booking">Booking (Reservasi Aktif)</option>
+                  <option value="Dipinjam">Dipinjam (Barang Diambil)</option>
+                  <option value="Dikembalikan">Dikembalikan (Selesai)</option>
+                  <option value="Terlambat">Terlambat (Jatuh Tempo)</option>
+                  <option value="Batal">Batal (Dibatalkan)</option>
+                </select>
+              </div>
 
               {/* Catatan */}
               <div>
@@ -696,6 +810,13 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
           </div>
         </div>
       )}
+
+      {/* Cetak Bukti A6 Modal */}
+      <CetakBuktiA6Modal
+        isOpen={isPrintModalOpen}
+        onClose={() => setIsPrintModalOpen(false)}
+        borrowData={printBorrowItem}
+      />
     </div>
   );
 }

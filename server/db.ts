@@ -226,14 +226,30 @@ export async function initDb() {
           id SERIAL PRIMARY KEY,
           nama_peminjam VARCHAR(100) NOT NULL,
           kontak_peminjam VARCHAR(50) NOT NULL,
+          akun_medsos VARCHAR(100),
+          alamat_domisili TEXT,
           barang_id INTEGER REFERENCES barang(id) ON DELETE CASCADE,
           jumlah INTEGER NOT NULL DEFAULT 1,
           tanggal_pinjam DATE NOT NULL,
           tanggal_kembali DATE NOT NULL,
+          jam_mulai VARCHAR(20),
+          jam_selesai VARCHAR(20),
+          jaminan TEXT,
+          keperluan_acara TEXT,
           status VARCHAR(20) NOT NULL DEFAULT 'Dipinjam',
           catatan TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+      `);
+
+      // Ensure existing table has the new booking columns
+      await client.query(`
+        ALTER TABLE peminjaman ADD COLUMN IF NOT EXISTS akun_medsos VARCHAR(100);
+        ALTER TABLE peminjaman ADD COLUMN IF NOT EXISTS alamat_domisili TEXT;
+        ALTER TABLE peminjaman ADD COLUMN IF NOT EXISTS jam_mulai VARCHAR(20);
+        ALTER TABLE peminjaman ADD COLUMN IF NOT EXISTS jam_selesai VARCHAR(20);
+        ALTER TABLE peminjaman ADD COLUMN IF NOT EXISTS jaminan TEXT;
+        ALTER TABLE peminjaman ADD COLUMN IF NOT EXISTS keperluan_acara TEXT;
       `);
 
       // Seed database if users table is empty
@@ -271,6 +287,7 @@ export async function initDb() {
       }
 
       client.release();
+      await syncStokTersedia();
     } catch (err) {
       console.error('❌ Failed to connect or initialize PostgreSQL database:', err);
       console.log('⚠️ Falling back to Local JSON Database for this session...');
@@ -400,9 +417,52 @@ export async function deleteUser(id: number): Promise<boolean> {
   }
 }
 
+// Sync stok_tersedia so it always matches stok_total - total active loans
+export async function syncStokTersedia(): Promise<void> {
+  if (isPostgres && pool) {
+    try {
+      await pool.query(`
+        UPDATE barang b
+        SET stok_tersedia = GREATEST(0, b.stok_total - COALESCE(
+          (SELECT SUM(p.jumlah)::INTEGER
+           FROM peminjaman p
+           WHERE p.barang_id = b.id AND p.status IN ('Booking', 'Dipinjam', 'Terlambat')), 0
+        ));
+      `);
+    } catch (err) {
+      console.error('Error syncing stok_tersedia in Postgres:', err);
+    }
+  } else {
+    try {
+      const db = readLocalDb();
+      const activeMap: Record<number, number> = {};
+      db.peminjaman.forEach(p => {
+        if (p.status === 'Booking' || p.status === 'Dipinjam' || p.status === 'Terlambat') {
+          activeMap[p.barang_id] = (activeMap[p.barang_id] || 0) + p.jumlah;
+        }
+      });
+      let changed = false;
+      db.barang.forEach(b => {
+        const activeCount = activeMap[b.id] || 0;
+        const expected = Math.max(0, b.stok_total - activeCount);
+        if (b.stok_tersedia !== expected) {
+          b.stok_tersedia = expected;
+          changed = true;
+        }
+      });
+      if (changed) {
+        writeLocalDb(db);
+      }
+    } catch (err) {
+      console.error('Error syncing stok_tersedia in Local DB:', err);
+    }
+  }
+}
+
 // 3. BARANG (ITEMS) ACTIONS
 export async function getBarang(): Promise<Barang[]> {
   await ensureDb();
+  await syncStokTersedia();
   if (isPostgres && pool) {
     const res = await pool.query('SELECT * FROM barang ORDER BY id DESC');
     return res.rows;
@@ -448,8 +508,6 @@ export async function createBarang(b: Omit<Barang, 'id'>): Promise<Barang> {
 export async function updateBarang(id: number, b: Partial<Barang>): Promise<Barang> {
   await ensureDb();
   if (isPostgres && pool) {
-    // We must handle stok adjustment carefully
-    // Calculate new stok_tersedia based on change in total stock
     const currentRes = await pool.query('SELECT stok_total, stok_tersedia FROM barang WHERE id = $1', [id]);
     if (currentRes.rows.length === 0) throw new Error('Barang tidak ditemukan');
     const curr = currentRes.rows[0];
@@ -460,11 +518,14 @@ export async function updateBarang(id: number, b: Partial<Barang>): Promise<Bara
       updatedStokTersedia = Math.max(0, curr.stok_tersedia + diff);
     }
 
-    const res = await pool.query(
-      'UPDATE barang SET nama = COALESCE($1, nama), kode = COALESCE($2, kode), kategori = COALESCE($3, kategori), stok_total = COALESCE($4, stok_total), stok_tersedia = $5, lokasi = COALESCE($6, lokasi), deskripsi = COALESCE($7, deskripsi), image_url = COALESCE($8, image_url) WHERE id = $9 RETURNING *',
+    await pool.query(
+      'UPDATE barang SET nama = COALESCE($1, nama), kode = COALESCE($2, kode), kategori = COALESCE($3, kategori), stok_total = COALESCE($4, stok_total), stok_tersedia = $5, lokasi = COALESCE($6, lokasi), deskripsi = COALESCE($7, deskripsi), image_url = COALESCE($8, image_url) WHERE id = $9',
       [b.nama, b.kode, b.kategori, b.stok_total, updatedStokTersedia, b.lokasi, b.deskripsi, b.image_url !== undefined ? b.image_url : null, id]
     );
-    return res.rows[0];
+
+    await syncStokTersedia();
+    const finalRes = await pool.query('SELECT * FROM barang WHERE id = $1', [id]);
+    return finalRes.rows[0];
   } else {
     const db = readLocalDb();
     const idx = db.barang.findIndex(item => item.id === id);
@@ -496,7 +557,9 @@ export async function updateBarang(id: number, b: Partial<Barang>): Promise<Bara
     };
 
     writeLocalDb(db);
-    return db.barang[idx];
+    await syncStokTersedia();
+    const updatedDb = readLocalDb();
+    return updatedDb.barang.find(item => item.id === id)!;
   }
 }
 
@@ -567,11 +630,32 @@ export async function createPeminjaman(p: Omit<Peminjaman, 'id'>): Promise<Pemin
       
       // Create Peminjaman
       const res = await client.query(
-        'INSERT INTO peminjaman (nama_peminjam, kontak_peminjam, barang_id, jumlah, tanggal_pinjam, tanggal_kembali, status, catatan) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
-        [p.nama_peminjam, p.kontak_peminjam, p.barang_id, p.jumlah, p.tanggal_pinjam, p.tanggal_kembali, p.status || 'Dipinjam', p.catatan]
+        `INSERT INTO peminjaman (
+          nama_peminjam, kontak_peminjam, akun_medsos, alamat_domisili, 
+          barang_id, jumlah, tanggal_pinjam, tanggal_kembali, 
+          jam_mulai, jam_selesai, jaminan, keperluan_acara, 
+          status, catatan
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+        [
+          p.nama_peminjam, 
+          p.kontak_peminjam, 
+          p.akun_medsos || '', 
+          p.alamat_domisili || '', 
+          p.barang_id, 
+          p.jumlah, 
+          p.tanggal_pinjam, 
+          p.tanggal_kembali, 
+          p.jam_mulai || '', 
+          p.jam_selesai || '', 
+          p.jaminan || '', 
+          p.keperluan_acara || '', 
+          p.status || 'Dipinjam', 
+          p.catatan || ''
+        ]
       );
       
       await client.query('COMMIT');
+      await syncStokTersedia();
       
       return {
         ...res.rows[0],
@@ -604,12 +688,18 @@ export async function createPeminjaman(p: Omit<Peminjaman, 'id'>): Promise<Pemin
       id: newId,
       nama_peminjam: p.nama_peminjam,
       kontak_peminjam: p.kontak_peminjam,
+      akun_medsos: p.akun_medsos || '',
+      alamat_domisili: p.alamat_domisili || '',
       barang_id: p.barang_id,
       jumlah: p.jumlah,
       tanggal_pinjam: p.tanggal_pinjam,
       tanggal_kembali: p.tanggal_kembali,
+      jam_mulai: p.jam_mulai || '',
+      jam_selesai: p.jam_selesai || '',
+      jaminan: p.jaminan || '',
+      keperluan_acara: p.keperluan_acara || '',
       status: p.status || 'Dipinjam',
-      catatan: p.catatan,
+      catatan: p.catatan || '',
       created_at: new Date().toISOString()
     };
     db.peminjaman.push(newP);
@@ -642,23 +732,20 @@ export async function updatePeminjaman(id: number, p: Partial<Peminjaman>): Prom
       if (bRes.rows.length === 0) throw new Error('Barang tidak ditemukan');
       const b = bRes.rows[0];
 
+      const isStatusActive = (s: string) => s === 'Booking' || s === 'Dipinjam' || s === 'Terlambat';
+
       // Handle stock return adjustments
-      // Case 1: Status changing from Dipinjam / Terlambat to Dikembalikan
-      if ((curr.status === 'Dipinjam' || curr.status === 'Terlambat') && finalStatus === 'Dikembalikan') {
-        // Return quantity to stock_tersedia
+      if (isStatusActive(curr.status) && !isStatusActive(finalStatus)) {
+        // Returned or cancelled: give back stock
         await client.query('UPDATE barang SET stok_tersedia = LEAST(stok_total, stok_tersedia + $1) WHERE id = $2', [curr.jumlah, bId]);
-      } 
-      // Case 2: Status changing from Dikembalikan back to Dipinjam / Terlambat
-      else if (curr.status === 'Dikembalikan' && (finalStatus === 'Dipinjam' || finalStatus === 'Terlambat')) {
-        // Check stock and deduct
+      } else if (!isStatusActive(curr.status) && isStatusActive(finalStatus)) {
+        // Becoming active again: deduct stock
         if (b.stok_tersedia < finalJumlah) {
-          throw new Error(`Stok tidak mencukupi untuk meminjam kembali. Tersedia: ${b.stok_tersedia}`);
+          throw new Error(`Stok tidak mencukupi. Tersedia: ${b.stok_tersedia}`);
         }
         await client.query('UPDATE barang SET stok_tersedia = stok_tersedia - $1 WHERE id = $2', [finalJumlah, bId]);
-      }
-      // Case 3: Still borrowed, but changing borrowing quantity
-      else if (curr.status !== 'Dikembalikan' && finalStatus !== 'Dikembalikan' && finalJumlah !== curr.jumlah) {
-        const diff = finalJumlah - curr.jumlah; // if increasing (+), need more stock. if decreasing (-), release stock.
+      } else if (isStatusActive(curr.status) && isStatusActive(finalStatus) && finalJumlah !== curr.jumlah) {
+        const diff = finalJumlah - curr.jumlah;
         if (b.stok_tersedia < diff) {
           throw new Error(`Stok tidak mencukupi untuk penyesuaian jumlah. Tersedia: ${b.stok_tersedia}`);
         }
@@ -666,11 +753,41 @@ export async function updatePeminjaman(id: number, p: Partial<Peminjaman>): Prom
       }
 
       const res = await pool.query(
-        'UPDATE peminjaman SET nama_peminjam = COALESCE($1, nama_peminjam), kontak_peminjam = COALESCE($2, kontak_peminjam), jumlah = $3, tanggal_pinjam = COALESCE($4, tanggal_pinjam), tanggal_kembali = COALESCE($5, tanggal_kembali), status = $6, catatan = COALESCE($7, catatan) WHERE id = $8 RETURNING *',
-        [p.nama_peminjam, p.kontak_peminjam, finalJumlah, p.tanggal_pinjam, p.tanggal_kembali, finalStatus, p.catatan, id]
+        `UPDATE peminjaman SET 
+          nama_peminjam = COALESCE($1, nama_peminjam), 
+          kontak_peminjam = COALESCE($2, kontak_peminjam), 
+          akun_medsos = COALESCE($3, akun_medsos), 
+          alamat_domisili = COALESCE($4, alamat_domisili), 
+          jumlah = $5, 
+          tanggal_pinjam = COALESCE($6, tanggal_pinjam), 
+          tanggal_kembali = COALESCE($7, tanggal_kembali), 
+          jam_mulai = COALESCE($8, jam_mulai), 
+          jam_selesai = COALESCE($9, jam_selesai), 
+          jaminan = COALESCE($10, jaminan), 
+          keperluan_acara = COALESCE($11, keperluan_acara), 
+          status = $12, 
+          catatan = COALESCE($13, catatan) 
+        WHERE id = $14 RETURNING *`,
+        [
+          p.nama_peminjam, 
+          p.kontak_peminjam, 
+          p.akun_medsos, 
+          p.alamat_domisili, 
+          finalJumlah, 
+          p.tanggal_pinjam, 
+          p.tanggal_kembali, 
+          p.jam_mulai, 
+          p.jam_selesai, 
+          p.jaminan, 
+          p.keperluan_acara, 
+          finalStatus, 
+          p.catatan, 
+          id
+        ]
       );
 
       await client.query('COMMIT');
+      await syncStokTersedia();
       return {
         ...res.rows[0],
         barang_nama: b.nama,
@@ -698,15 +815,16 @@ export async function updatePeminjaman(id: number, p: Partial<Peminjaman>): Prom
     let finalStatus = p.status ?? curr.status;
     let finalJumlah = p.jumlah ?? curr.jumlah;
 
-    // Adjustments
-    if ((curr.status === 'Dipinjam' || curr.status === 'Terlambat') && finalStatus === 'Dikembalikan') {
+    const isStatusActive = (s: string) => s === 'Booking' || s === 'Dipinjam' || s === 'Terlambat';
+
+    if (isStatusActive(curr.status) && !isStatusActive(finalStatus)) {
       db.barang[bIdx].stok_tersedia = Math.min(b.stok_total, b.stok_tersedia + curr.jumlah);
-    } else if (curr.status === 'Dikembalikan' && (finalStatus === 'Dipinjam' || finalStatus === 'Terlambat')) {
+    } else if (!isStatusActive(curr.status) && isStatusActive(finalStatus)) {
       if (b.stok_tersedia < finalJumlah) {
-        throw new Error(`Stok tidak mencukupi untuk meminjam kembali. Tersedia: ${b.stok_tersedia}`);
+        throw new Error(`Stok tidak mencukupi untuk mengaktifkan kembali. Tersedia: ${b.stok_tersedia}`);
       }
       db.barang[bIdx].stok_tersedia -= finalJumlah;
-    } else if (curr.status !== 'Dikembalikan' && finalStatus !== 'Dikembalikan' && finalJumlah !== curr.jumlah) {
+    } else if (isStatusActive(curr.status) && isStatusActive(finalStatus) && finalJumlah !== curr.jumlah) {
       const diff = finalJumlah - curr.jumlah;
       if (b.stok_tersedia < diff) {
         throw new Error(`Stok tidak mencukupi untuk penyesuaian. Tersedia: ${b.stok_tersedia}`);
@@ -718,14 +836,21 @@ export async function updatePeminjaman(id: number, p: Partial<Peminjaman>): Prom
       ...curr,
       nama_peminjam: p.nama_peminjam ?? curr.nama_peminjam,
       kontak_peminjam: p.kontak_peminjam ?? curr.kontak_peminjam,
+      akun_medsos: p.akun_medsos ?? curr.akun_medsos,
+      alamat_domisili: p.alamat_domisili ?? curr.alamat_domisili,
       jumlah: finalJumlah,
       tanggal_pinjam: p.tanggal_pinjam ?? curr.tanggal_pinjam,
       tanggal_kembali: p.tanggal_kembali ?? curr.tanggal_kembali,
+      jam_mulai: p.jam_mulai ?? curr.jam_mulai,
+      jam_selesai: p.jam_selesai ?? curr.jam_selesai,
+      jaminan: p.jaminan ?? curr.jaminan,
+      keperluan_acara: p.keperluan_acara ?? curr.keperluan_acara,
       status: finalStatus,
       catatan: p.catatan ?? curr.catatan,
     };
 
     writeLocalDb(db);
+    await syncStokTersedia();
     return {
       ...db.peminjaman[pIdx],
       barang_nama: b.nama,
@@ -750,6 +875,7 @@ export async function deletePeminjaman(id: number): Promise<boolean> {
       }
       await client.query('DELETE FROM peminjaman WHERE id = $1', [id]);
       await client.query('COMMIT');
+      await syncStokTersedia();
       return true;
     } catch (err) {
       await client.query('ROLLBACK');
@@ -770,6 +896,7 @@ export async function deletePeminjaman(id: number): Promise<boolean> {
       }
       db.peminjaman.splice(idx, 1);
       writeLocalDb(db);
+      await syncStokTersedia();
       return true;
     }
     return false;
