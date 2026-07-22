@@ -139,7 +139,7 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
                 <Camera className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-lg leading-tight">Form Booking Sewa Kamera & Alat</h3>
+                <h3 className="font-bold text-lg leading-tight">Form Booking/Sewa Alat</h3>
                 <p className="text-xs text-slate-300">Isi data peminjaman/booking sesuai format resmi sekolah</p>
               </div>
             </div>
