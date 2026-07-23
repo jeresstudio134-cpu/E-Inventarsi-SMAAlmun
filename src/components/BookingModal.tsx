@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, Calendar, Clock, User, Phone, MapPin, Shield, FileText, CheckCircle2, AlertCircle, X, Share2, Printer, Copy, Check } from 'lucide-react';
+import { Camera, Calendar, Clock, User, Phone, MapPin, Shield, FileText, CheckCircle2, AlertCircle, X, Share2, Printer, Copy, Check, Plus, Trash2 } from 'lucide-react';
 import { Barang, Peminjaman } from '../types.js';
 import { api } from '../lib/api.js';
 import CetakBuktiA6Modal, { buildBookingWhatsAppText } from './CetakBuktiA6Modal.js';
@@ -18,8 +18,12 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
   const [akunMedsos, setAkunMedsos] = useState('');
   const [noWhatsapp, setNoWhatsapp] = useState('');
   const [alamatDomisili, setAlamatDomisili] = useState('');
-  const [barangId, setBarangId] = useState<number>(0);
-  const [jumlahUnit, setJumlahUnit] = useState<number>(1);
+  
+  // Multi-item selection list
+  const [selectedItems, setSelectedItems] = useState<Array<{ barangId: number; jumlahUnit: number }>>([
+    { barangId: 0, jumlahUnit: 1 }
+  ]);
+
   const [tanggalMulai, setTanggalMulai] = useState('');
   const [jamMulai, setJamMulai] = useState('08:00');
   const [tanggalSelesai, setTanggalSelesai] = useState('');
@@ -30,7 +34,7 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
   // UI state
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [createdBooking, setCreatedBooking] = useState<Peminjaman | null>(null);
+  const [createdBookings, setCreatedBookings] = useState<Peminjaman[]>([]);
   const [copiedWA, setCopiedWA] = useState(false);
   const [isA6ModalOpen, setIsA6ModalOpen] = useState(false);
 
@@ -43,14 +47,12 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
       setAlamatDomisili('');
       
       if (selectedItem) {
-        setBarangId(selectedItem.id);
+        setSelectedItems([{ barangId: selectedItem.id, jumlahUnit: 1 }]);
       } else if (items.length > 0) {
-        setBarangId(items[0].id);
+        setSelectedItems([{ barangId: items[0].id, jumlahUnit: 1 }]);
       } else {
-        setBarangId(0);
+        setSelectedItems([{ barangId: 0, jumlahUnit: 1 }]);
       }
-
-      setJumlahUnit(1);
 
       const todayStr = new Date().toISOString().split('T')[0];
       setTanggalMulai(todayStr);
@@ -64,53 +66,101 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
       setJaminanSewa('KTP & SIM A');
       setKeperluanAcara('');
       setError(null);
-      setCreatedBooking(null);
+      setCreatedBookings([]);
     }
   }, [isOpen, selectedItem, items]);
 
   if (!isOpen) return null;
 
-  const currentItem = items.find(i => i.id === barangId);
+  const handleAddItemRow = () => {
+    const chosenIds = new Set(selectedItems.map(i => i.barangId));
+    const availableNext = items.find(i => !chosenIds.has(i.id) && i.stok_tersedia > 0) || items[0];
+    if (availableNext) {
+      setSelectedItems(prev => [...prev, { barangId: availableNext.id, jumlahUnit: 1 }]);
+    }
+  };
+
+  const handleRemoveItemRow = (index: number) => {
+    if (selectedItems.length <= 1) return;
+    setSelectedItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleItemRowChange = (index: number, field: 'barangId' | 'jumlahUnit', val: number) => {
+    setSelectedItems(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: val };
+      return updated;
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!namaLengkap || !akunMedsos || !noWhatsapp || !alamatDomisili || !barangId || !jumlahUnit || !tanggalMulai || !tanggalSelesai || !jaminanSewa || !keperluanAcara) {
+    if (!namaLengkap || !akunMedsos || !noWhatsapp || !alamatDomisili || !tanggalMulai || !tanggalSelesai || !jaminanSewa || !keperluanAcara) {
       setError('Mohon lengkapi seluruh kolom formulir booking (*).');
       return;
     }
 
-    if (!currentItem) {
-      setError('Pilihan alat tidak valid.');
+    if (selectedItems.length === 0) {
+      setError('Mohon pilih minimal 1 barang/alat untuk disewa.');
       return;
     }
 
-    if (currentItem.stok_tersedia < jumlahUnit) {
-      setError(`Stok alat tidak mencukupi. Sisa stok tersedia: ${currentItem.stok_tersedia} unit.`);
+    // Validate barang selections
+    for (const itemRow of selectedItems) {
+      if (!itemRow.barangId || itemRow.barangId <= 0) {
+        setError('Mohon pilih barang yang valid pada semua daftar pinjaman.');
+        return;
+      }
+    }
+
+    // Validate duplicates
+    const selectedIds = selectedItems.map(i => i.barangId);
+    const uniqueIds = new Set(selectedIds);
+    if (uniqueIds.size < selectedIds.length) {
+      setError('Terdapat barang yang dipilih lebih dari satu kali. Mohon gabungkan jumlah unitnya pada satu baris.');
       return;
+    }
+
+    // Validate stock limits
+    for (const itemRow of selectedItems) {
+      const targetBarang = items.find(i => i.id === itemRow.barangId);
+      if (!targetBarang) {
+        setError('Terdapat pilihan barang yang tidak valid.');
+        return;
+      }
+      if (targetBarang.stok_tersedia < itemRow.jumlahUnit) {
+        setError(`Stok alat "${targetBarang.nama}" tidak mencukupi. Sisa stok tersedia: ${targetBarang.stok_tersedia} unit.`);
+        return;
+      }
     }
 
     setIsSubmitting(true);
     setError(null);
 
     try {
-      const payload = {
-        nama_peminjam: namaLengkap,
-        kontak_peminjam: noWhatsapp,
-        akun_medsos: akunMedsos,
-        alamat_domisili: alamatDomisili,
-        barang_id: barangId,
-        jumlah: jumlahUnit,
-        tanggal_pinjam: tanggalMulai,
-        tanggal_kembali: tanggalSelesai,
-        jam_mulai: jamMulai,
-        jam_selesai: jamSelesai,
-        jaminan: jaminanSewa,
-        keperluan_acara: keperluanAcara,
-        catatan: `Booking Sewa: ${keperluanAcara}`
-      };
+      const createdList: Peminjaman[] = [];
+      for (const itemRow of selectedItems) {
+        const payload = {
+          nama_peminjam: namaLengkap,
+          kontak_peminjam: noWhatsapp,
+          akun_medsos: akunMedsos,
+          alamat_domisili: alamatDomisili,
+          barang_id: itemRow.barangId,
+          jumlah: itemRow.jumlahUnit,
+          tanggal_pinjam: tanggalMulai,
+          tanggal_kembali: tanggalSelesai,
+          jam_mulai: jamMulai,
+          jam_selesai: jamSelesai,
+          jaminan: jaminanSewa,
+          keperluan_acara: keperluanAcara,
+          catatan: `Booking Sewa (${selectedItems.length} barang): ${keperluanAcara}`
+        };
 
-      const result = await api.createPublicBooking(payload);
-      setCreatedBooking(result);
+        const result = await api.createPublicBooking(payload);
+        createdList.push(result);
+      }
+
+      setCreatedBookings(createdList);
       if (onSuccessTrigger) onSuccessTrigger();
     } catch (err: any) {
       setError(err.message || 'Gagal mengirim pengajuan booking sewa.');
@@ -120,8 +170,8 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
   };
 
   const handleCopyWA = () => {
-    if (!createdBooking) return;
-    const text = buildBookingWhatsAppText(createdBooking);
+    if (createdBookings.length === 0) return;
+    const text = buildBookingWhatsAppText(createdBookings);
     navigator.clipboard.writeText(text);
     setCopiedWA(true);
     setTimeout(() => setCopiedWA(false), 2000);
@@ -139,7 +189,7 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
                 <Camera className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-lg leading-tight">Form Booking/Sewa Alat</h3>
+                <h3 className="font-bold text-lg leading-tight">Form Booking Sewa Alat</h3>
                 <p className="text-xs text-slate-300">Isi data peminjaman/booking sesuai format resmi sekolah</p>
               </div>
             </div>
@@ -156,21 +206,21 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
           <div className="p-6 overflow-y-auto space-y-6">
 
             {/* If Successful Booking Submission */}
-            {createdBooking ? (
+            {createdBookings.length > 0 ? (
               <div className="space-y-6">
                 <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl flex items-start gap-3">
                   <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
                   <div>
                     <h4 className="font-bold text-base text-emerald-950">Permohonan Booking Sewa Berhasil Terkirim!</h4>
                     <p className="text-xs text-emerald-800 mt-1">
-                      Data booking Anda telah tersimpan dengan ID Transaksi <span className="font-mono font-bold">TRX-{createdBooking.id.toString().padStart(4, '0')}</span>. Silakan simpan format pesan di bawah ini atau cetak bukti bukti sewa A6 untuk diserahkan ke petugas lab.
+                      Data booking ({createdBookings.length} barang) telah tersimpan dengan ID Transaksi <span className="font-mono font-bold">{createdBookings.map(b => `TRX-${b.id.toString().padStart(4, '0')}`).join(', ')}</span>. Silakan simpan format pesan di bawah ini atau cetak bukti sewa A6 untuk diserahkan ke petugas lab.
                     </p>
                   </div>
                 </div>
 
                 {/* Text Summary Format Preview */}
                 <div className="bg-slate-900 text-slate-100 p-4 rounded-xl text-xs font-mono whitespace-pre-wrap leading-relaxed shadow-inner border border-slate-800">
-                  {buildBookingWhatsAppText(createdBooking)}
+                  {buildBookingWhatsAppText(createdBookings)}
                 </div>
 
                 {/* Actions */}
@@ -271,47 +321,90 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
                   </div>
                 </div>
 
-                {/* Section 2: Detail Alat */}
+                {/* Section 2: Detail Alat Multiple */}
                 <div className="space-y-3 pt-2">
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-100 pb-1.5">
-                    <Camera className="w-3.5 h-3.5 text-blue-600" />
-                    <span>2. Tipe Kamera / Alat yang Disewa</span>
-                  </h4>
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Camera className="w-3.5 h-3.5 text-blue-600" />
+                      <span>2. Tipe Kamera / Peralatan yang Disewa</span>
+                    </h4>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Pilih Kamera / Peralatan <span className="text-rose-500">*</span>
-                      </label>
-                      <select
-                        value={barangId}
-                        onChange={(e) => setBarangId(Number(e.target.value))}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none"
-                      >
-                        <option value={0}>-- Pilih Peralatan --</option>
-                        {items.map(item => (
-                          <option key={item.id} value={item.id}>
-                            {item.nama} ({item.kode}) - Tersedia: {item.stok_tersedia} unit
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddItemRow}
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Barang</span>
+                    </button>
+                  </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Jumlah Unit <span className="text-rose-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={currentItem ? currentItem.stok_tersedia : 10}
-                        value={jumlahUnit}
-                        onChange={(e) => setJumlahUnit(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none font-bold"
-                      />
-                    </div>
+                  <div className="space-y-3">
+                    {selectedItems.map((itemRow, idx) => {
+                      const selectedBarangData = items.find(i => i.id === itemRow.barangId);
+                      return (
+                        <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 relative group">
+                          <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
+                            <span className="font-bold text-slate-700">Barang #{idx + 1}</span>
+                            {selectedItems.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItemRow(idx)}
+                                className="text-rose-500 hover:text-rose-700 p-1 hover:bg-rose-50 rounded-md transition cursor-pointer flex items-center gap-1 text-xs"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Hapus</span>
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                                Pilih Peralatan <span className="text-rose-500">*</span>
+                              </label>
+                              <select
+                                value={itemRow.barangId}
+                                onChange={(e) => handleItemRowChange(idx, 'barangId', Number(e.target.value))}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none font-medium text-slate-800"
+                              >
+                                <option value={0}>-- Pilih Peralatan --</option>
+                                {items.map(item => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.nama} ({item.kode}) - Tersedia: {item.stok_tersedia} unit
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                                Jumlah Unit <span className="text-rose-500">*</span>
+                              </label>
+                              <input
+                                type="number"
+                                min={1}
+                                max={selectedBarangData ? selectedBarangData.stok_tersedia : 10}
+                                value={itemRow.jumlahUnit}
+                                onChange={(e) => handleItemRowChange(idx, 'jumlahUnit', Math.max(1, parseInt(e.target.value) || 1))}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900"
+                              />
+                            </div>
+                          </div>
+
+                          {selectedBarangData && (
+                            <div className="text-[11px] text-slate-500 flex items-center justify-between pt-1">
+                              <span>Sisa stok tersedia: <strong className="text-slate-800">{selectedBarangData.stok_tersedia} Unit</strong></span>
+                              <span className="text-blue-600 font-semibold">{selectedBarangData.kategori}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
+
+                {/* Section 3: Waktu Sewa */}
 
                 {/* Section 3: Waktu Sewa */}
                 <div className="space-y-3 pt-2">
@@ -437,7 +530,7 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
           </div>
 
           {/* Modal Footer */}
-          {createdBooking && (
+          {createdBookings.length > 0 && (
             <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end">
               <button
                 onClick={onClose}
@@ -452,9 +545,9 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
       </div>
 
       {/* A6 Print Modal Nested */}
-      {createdBooking && (
+      {createdBookings.length > 0 && (
         <CetakBuktiA6Modal
-          borrow={createdBooking}
+          borrows={createdBookings}
           isOpen={isA6ModalOpen}
           onClose={() => setIsA6ModalOpen(false)}
         />

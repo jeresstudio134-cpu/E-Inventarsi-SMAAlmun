@@ -5,45 +5,67 @@ import { Peminjaman } from '../types.js';
 interface CetakBuktiA6ModalProps {
   borrow?: Peminjaman | null;
   borrowData?: Peminjaman | null;
+  borrows?: Peminjaman[] | null;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function buildBookingWhatsAppText(borrow: Peminjaman): string {
-  const tglMulai = `${borrow.tanggal_pinjam}${borrow.jam_mulai ? ', Jam ' + borrow.jam_mulai : ''}`;
-  const tglSelesai = `${borrow.tanggal_kembali}${borrow.jam_selesai ? ', Jam ' + borrow.jam_selesai : ''}`;
+export function buildBookingWhatsAppText(borrowsInput: Peminjaman | Peminjaman[]): string {
+  const borrows = Array.isArray(borrowsInput) ? borrowsInput : (borrowsInput ? [borrowsInput] : []);
+  if (borrows.length === 0) return '';
   
+  const first = borrows[0];
+  const tglMulai = `${first.tanggal_pinjam}${first.jam_mulai ? ', Jam ' + first.jam_mulai : ''}`;
+  const tglSelesai = `${first.tanggal_kembali}${first.jam_selesai ? ', Jam ' + first.jam_selesai : ''}`;
+  
+  const itemsText = borrows.map((b, i) => `${i + 1}. *${b.barang_nama || 'Alat'}* (${b.barang_kode || '-'}) - *${b.jumlah} Unit*`).join('\n');
+  const totalUnits = borrows.reduce((acc, curr) => acc + curr.jumlah, 0);
+  const trxIds = borrows.map(b => `TRX-${b.id.toString().padStart(4, '0')}`).join(', ');
+
   return `*FORMAT BOOKING SEWA KAMERA / ALAT*
 *E-INVENTARIS SMA AL MUNAWWARIYYAH*
 ----------------------------------------
-*Nama Lengkap:* ${borrow.nama_peminjam}
-*Nama Akun Medsos (IG/TikTok):* ${borrow.akun_medsos || '-'}
-*No. WhatsApp / HP Aktif:* ${borrow.kontak_peminjam}
-*Alamat Domisili (Shareloc jika diperlukan):* ${borrow.alamat_domisili || '-'}
-*Tipe Kamera / Alat yang Disewa:* ${borrow.barang_nama || 'Alat'} (${borrow.barang_kode || ''})
-*Jumlah Unit:* ${borrow.jumlah} Unit
+*Nama Lengkap:* ${first.nama_peminjam}
+*Nama Akun Medsos (IG/TikTok):* ${first.akun_medsos || '-'}
+*No. WhatsApp / HP Aktif:* ${first.kontak_peminjam}
+*Alamat Domisili:* ${first.alamat_domisili || '-'}
+
+*Daftar Kamera / Alat Disewa (${borrows.length} Jenis, Total ${totalUnits} Unit):*
+${itemsText}
+
 *Tanggal Mulai Sewa:* ${tglMulai}
 *Tanggal Selesai Sewa:* ${tglSelesai}
-*Jaminan Sewa (Minimal 2 Identitas Asli):* ${borrow.jaminan || '-'}
-*Keperluan Acara:* ${borrow.keperluan_acara || borrow.catatan || '-'}
-*Status:* ${borrow.status.toUpperCase()}
+*Jaminan Sewa (Min. 2 Identitas Asli):* ${first.jaminan || '-'}
+*Keperluan Acara:* ${first.keperluan_acara || first.catatan || '-'}
+*Status:* ${first.status.toUpperCase()}
 ----------------------------------------
-*ID Transaksi:* TRX-${borrow.id.toString().padStart(4, '0')}
-*Waktu Pengajuan:* ${borrow.created_at ? new Date(borrow.created_at).toLocaleString('id-ID') : new Date().toLocaleString('id-ID')}`;
+*ID Transaksi:* ${trxIds}
+*Waktu Pengajuan:* ${first.created_at ? new Date(first.created_at).toLocaleString('id-ID') : new Date().toLocaleString('id-ID')}`;
 }
 
-export default function CetakBuktiA6Modal({ borrow, borrowData, isOpen, onClose }: CetakBuktiA6ModalProps) {
+export default function CetakBuktiA6Modal({ borrow, borrowData, borrows, isOpen, onClose }: CetakBuktiA6ModalProps) {
   const [copied, setCopied] = useState(false);
-  const activeBorrow = borrow || borrowData;
+  
+  // Normalize items list
+  let itemList: Peminjaman[] = [];
+  if (borrows && borrows.length > 0) {
+    itemList = borrows;
+  } else if (borrow) {
+    itemList = [borrow];
+  } else if (borrowData) {
+    itemList = [borrowData];
+  }
 
-  if (!isOpen || !activeBorrow) return null;
+  if (!isOpen || itemList.length === 0) return null;
+
+  const activeBorrow = itemList[0];
 
   const handlePrint = () => {
     window.print();
   };
 
   const handleCopyWA = () => {
-    const text = buildBookingWhatsAppText(activeBorrow);
+    const text = buildBookingWhatsAppText(itemList);
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -157,7 +179,7 @@ export default function CetakBuktiA6Modal({ borrow, borrowData, isOpen, onClose 
             <div>
               <div className="text-center border-b-2 border-slate-900 pb-2 mb-2">
                 <h4 className="font-extrabold text-[13px] tracking-wider text-slate-900 uppercase">SMA AL MUNAWWARIYYAH</h4>
-                <p className="text-[10px] font-bold text-slate-700 tracking-tight uppercase">E-INVENTARIS & SEWA ALAT</p>
+                <p className="text-[10px] font-bold text-slate-700 tracking-tight uppercase">E-INVENTARIS & SEWA ALAT MULTIMEDIA</p>
                 <p className="text-[8px] text-slate-500">Jl. Raya Sudimoro No. 9, Bululawang, Malang, Jawa Timur</p>
               </div>
 
@@ -165,7 +187,11 @@ export default function CetakBuktiA6Modal({ borrow, borrowData, isOpen, onClose 
               <div className="flex items-center justify-between mb-2">
                 <div>
                   <span className="font-black text-[11px] text-slate-900 tracking-tight block">BUKTI SEWA / PEMINJAMAN</span>
-                  <span className="text-[9px] text-slate-500 font-mono">TRX-{activeBorrow.id.toString().padStart(4, '0')}</span>
+                  <span className="text-[9px] text-slate-500 font-mono">
+                    {itemList.length === 1 
+                      ? `TRX-${activeBorrow.id.toString().padStart(4, '0')}`
+                      : `${itemList.length} TRANSAKSI (${itemList.map(i => `TRX-${i.id.toString().padStart(4, '0')}`).join(', ')})`}
+                  </span>
                 </div>
                 <div className="px-2 py-0.5 border border-slate-900 font-black text-[9px] uppercase tracking-wider rounded">
                   {activeBorrow.status}
@@ -197,25 +223,30 @@ export default function CetakBuktiA6Modal({ borrow, borrowData, isOpen, onClose 
 
                 {/* Barang & Waktu Info */}
                 <div className="bg-slate-50 p-1.5 rounded border border-slate-200 space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Alat Disewa:</span>
-                    <span className="font-bold text-blue-900">{activeBorrow.barang_nama || 'Alat'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Kode & Jumlah:</span>
-                    <span className="font-semibold text-slate-800">{activeBorrow.barang_kode || '-'} ({activeBorrow.jumlah} Unit)</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Mulai Sewa:</span>
-                    <span className="font-semibold text-slate-800">
-                      {formatDisplayDate(activeBorrow.tanggal_pinjam)}{activeBorrow.jam_mulai ? `, Pkl ${activeBorrow.jam_mulai}` : ''}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Selesai Sewa:</span>
-                    <span className="font-semibold text-slate-800">
-                      {formatDisplayDate(activeBorrow.tanggal_kembali)}{activeBorrow.jam_selesai ? `, Pkl ${activeBorrow.jam_selesai}` : ''}
-                    </span>
+                  <span className="text-[9px] font-bold text-slate-700 block border-b border-slate-200 pb-0.5">
+                    Rincian Alat Disewa ({itemList.length} Jenis, Total {itemList.reduce((a, b) => a + b.jumlah, 0)} Unit):
+                  </span>
+                  {itemList.map((item, idx) => (
+                    <div key={item.id || idx} className="flex justify-between items-center text-[9.5px]">
+                      <span className="font-bold text-blue-900 truncate max-w-[190px]">
+                        {itemList.length > 1 ? `${idx + 1}. ` : ''}{item.barang_nama || 'Alat'} <span className="font-normal text-slate-500">({item.barang_kode || '-'})</span>
+                      </span>
+                      <span className="font-bold text-slate-800 shrink-0">{item.jumlah} Unit</span>
+                    </div>
+                  ))}
+                  <div className="pt-1 border-t border-slate-200 space-y-0.5 text-[9px]">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-medium">Mulai Sewa:</span>
+                      <span className="font-semibold text-slate-800">
+                        {formatDisplayDate(activeBorrow.tanggal_pinjam)}{activeBorrow.jam_mulai ? `, Pkl ${activeBorrow.jam_mulai}` : ''}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-medium">Selesai Sewa:</span>
+                      <span className="font-semibold text-slate-800">
+                        {formatDisplayDate(activeBorrow.tanggal_kembali)}{activeBorrow.jam_selesai ? `, Pkl ${activeBorrow.jam_selesai}` : ''}
+                      </span>
+                    </div>
                   </div>
                 </div>
 

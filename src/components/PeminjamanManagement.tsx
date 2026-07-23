@@ -38,6 +38,9 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
   const [formAlamatDomisili, setFormAlamatDomisili] = useState('');
   const [formBarangId, setFormBarangId] = useState<number>(0);
   const [formJumlah, setFormJumlah] = useState<number>(1);
+  const [formSelectedItems, setFormSelectedItems] = useState<Array<{ barangId: number; jumlah: number }>>([
+    { barangId: 0, jumlah: 1 }
+  ]);
   const [formTanggalPinjam, setFormTanggalPinjam] = useState('');
   const [formJamMulai, setFormJamMulai] = useState('08:00');
   const [formTanggalKembali, setFormTanggalKembali] = useState('');
@@ -87,9 +90,10 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
     
     // Choose first available item as default if any
     const availableItems = items.filter(i => i.stok_tersedia > 0);
-    setFormBarangId(availableItems.length > 0 ? availableItems[0].id : (items.length > 0 ? items[0].id : 0));
-    
+    const firstId = availableItems.length > 0 ? availableItems[0].id : (items.length > 0 ? items[0].id : 0);
+    setFormBarangId(firstId);
     setFormJumlah(1);
+    setFormSelectedItems([{ barangId: firstId, jumlah: 1 }]);
     
     // Default dates & time
     const today = new Date().toISOString().split('T')[0];
@@ -147,31 +151,52 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
   // Handle submit (Create or Edit)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formNamaPeminjam || !formKontakPeminjam || !formBarangId || !formJumlah || !formTanggalPinjam || !formTanggalKembali) {
+    if (!formNamaPeminjam || !formKontakPeminjam || !formTanggalPinjam || !formTanggalKembali) {
       setFormError('Mohon isi seluruh kolom wajib (*)');
       return;
     }
 
-    // Validation: check stock availability during create
-    const targetItem = items.find(i => i.id === formBarangId);
-    if (!targetItem) {
-      setFormError('Barang tidak valid.');
-      return;
-    }
+    if (modalMode === 'create') {
+      if (formSelectedItems.length === 0) {
+        setFormError('Pilih minimal 1 barang/alat yang ingin dipinjam.');
+        return;
+      }
 
-    if (modalMode === 'create' && targetItem.stok_tersedia < formJumlah) {
-      setFormError(`Stok tidak mencukupi. Stok tersedia saat ini: ${targetItem.stok_tersedia} unit.`);
-      return;
-    }
-
-    // If edit, check stock change safely
-    if (modalMode === 'edit' && selectedBorrow) {
-      const stockDiff = formJumlah - selectedBorrow.jumlah;
-      // If we are increasing the borrow amount and item is still active, verify stock
-      if (formStatus !== 'Dikembalikan' && selectedBorrow.status !== 'Dikembalikan' && stockDiff > 0) {
-        if (targetItem.stok_tersedia < stockDiff) {
-          setFormError(`Stok tambahan tidak mencukupi. Tersedia: ${targetItem.stok_tersedia} unit.`);
+      for (const row of formSelectedItems) {
+        if (!row.barangId || row.barangId <= 0) {
+          setFormError('Mohon pilih barang yang valid.');
           return;
+        }
+        const target = items.find(i => i.id === row.barangId);
+        if (!target) {
+          setFormError('Barang tidak ditemukan.');
+          return;
+        }
+        if (target.stok_tersedia < row.jumlah) {
+          setFormError(`Stok "${target.nama}" tidak mencukupi. Tersedia: ${target.stok_tersedia} unit.`);
+          return;
+        }
+      }
+
+      const selectedIds = formSelectedItems.map(i => i.barangId);
+      if (new Set(selectedIds).size < selectedIds.length) {
+        setFormError('Terdapat barang yang dipilih lebih dari satu kali. Mohon gabungkan jumlahnya.');
+        return;
+      }
+    } else {
+      // Edit mode validation
+      const targetItem = items.find(i => i.id === formBarangId);
+      if (!targetItem) {
+        setFormError('Barang tidak valid.');
+        return;
+      }
+      if (selectedBorrow) {
+        const stockDiff = formJumlah - selectedBorrow.jumlah;
+        if (formStatus !== 'Dikembalikan' && selectedBorrow.status !== 'Dikembalikan' && stockDiff > 0) {
+          if (targetItem.stok_tersedia < stockDiff) {
+            setFormError(`Stok tambahan tidak mencukupi. Tersedia: ${targetItem.stok_tersedia} unit.`);
+            return;
+          }
         }
       }
     }
@@ -179,27 +204,44 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
     setIsSubmitting(true);
     setFormError(null);
 
-    const payload = {
-      nama_peminjam: formNamaPeminjam,
-      kontak_peminjam: formKontakPeminjam,
-      akun_medsos: formAkunMedsos,
-      alamat_domisili: formAlamatDomisili,
-      barang_id: formBarangId,
-      jumlah: formJumlah,
-      tanggal_pinjam: formTanggalPinjam,
-      tanggal_kembali: formTanggalKembali,
-      jam_mulai: formJamMulai,
-      jam_selesai: formJamSelesai,
-      jaminan: formJaminan,
-      keperluan_acara: formKeperluanAcara,
-      status: formStatus,
-      catatan: formCatatan
-    };
-
     try {
       if (modalMode === 'create') {
-        await api.createPeminjaman(payload);
+        for (const row of formSelectedItems) {
+          const payload = {
+            nama_peminjam: formNamaPeminjam,
+            kontak_peminjam: formKontakPeminjam,
+            akun_medsos: formAkunMedsos,
+            alamat_domisili: formAlamatDomisili,
+            barang_id: row.barangId,
+            jumlah: row.jumlah,
+            tanggal_pinjam: formTanggalPinjam,
+            tanggal_kembali: formTanggalKembali,
+            jam_mulai: formJamMulai,
+            jam_selesai: formJamSelesai,
+            jaminan: formJaminan,
+            keperluan_acara: formKeperluanAcara,
+            status: formStatus,
+            catatan: formCatatan
+          };
+          await api.createPeminjaman(payload);
+        }
       } else if (selectedBorrow) {
+        const payload = {
+          nama_peminjam: formNamaPeminjam,
+          kontak_peminjam: formKontakPeminjam,
+          akun_medsos: formAkunMedsos,
+          alamat_domisili: formAlamatDomisili,
+          barang_id: formBarangId,
+          jumlah: formJumlah,
+          tanggal_pinjam: formTanggalPinjam,
+          tanggal_kembali: formTanggalKembali,
+          jam_mulai: formJamMulai,
+          jam_selesai: formJamSelesai,
+          jaminan: formJaminan,
+          keperluan_acara: formKeperluanAcara,
+          status: formStatus,
+          catatan: formCatatan
+        };
         await api.updatePeminjaman(selectedBorrow.id, payload);
       }
 
@@ -631,48 +673,130 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
               </div>
 
               {/* Barang Selection & Jumlah */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
-                    Pilih Barang / Alat *
-                  </label>
-                  <select
-                    id="form-pinjam-barang-id"
-                    value={formBarangId}
-                    onChange={(e) => setFormBarangId(parseInt(e.target.value, 10))}
-                    disabled={modalMode === 'edit'}
-                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition disabled:bg-slate-50 disabled:text-slate-400"
-                  >
-                    <option value={0} disabled>-- Pilih Barang --</option>
-                    {items.map(i => {
-                      const isOutOfStock = i.stok_tersedia === 0 && modalMode === 'create';
+              {modalMode === 'create' ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+                    <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                      Daftar Barang / Alat Disewa *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const chosen = new Set(formSelectedItems.map(i => i.barangId));
+                        const next = items.find(i => !chosen.has(i.id) && i.stok_tersedia > 0) || items[0];
+                        if (next) {
+                          setFormSelectedItems([...formSelectedItems, { barangId: next.id, jumlah: 1 }]);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Barang</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {formSelectedItems.map((row, idx) => {
+                      const itemData = items.find(i => i.id === row.barangId);
                       return (
-                        <option
-                          key={i.id}
-                          value={i.id}
-                          disabled={isOutOfStock}
-                        >
-                          {i.nama} ({i.kode}) - Stok: {i.stok_tersedia} Unit
-                        </option>
+                        <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                          <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
+                            <span className="font-bold text-slate-700">Barang #{idx + 1}</span>
+                            {formSelectedItems.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => setFormSelectedItems(formSelectedItems.filter((_, i) => i !== idx))}
+                                className="text-rose-500 hover:text-rose-700 p-1 hover:bg-rose-50 rounded-md transition cursor-pointer flex items-center gap-1 text-xs"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Hapus</span>
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="sm:col-span-2">
+                              <select
+                                value={row.barangId}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10);
+                                  setFormSelectedItems(prev => {
+                                    const u = [...prev];
+                                    u[idx] = { ...u[idx], barangId: val };
+                                    return u;
+                                  });
+                                }}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition font-medium text-slate-800"
+                              >
+                                <option value={0} disabled>-- Pilih Barang --</option>
+                                {items.map(i => (
+                                  <option key={i.id} value={i.id} disabled={i.stok_tersedia === 0}>
+                                    {i.nama} ({i.kode}) - Stok: {i.stok_tersedia} Unit
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <input
+                                type="number"
+                                min="1"
+                                max={itemData ? itemData.stok_tersedia : 10}
+                                value={row.jumlah}
+                                onChange={(e) => {
+                                  const val = Math.max(1, parseInt(e.target.value, 10) || 1);
+                                  setFormSelectedItems(prev => {
+                                    const u = [...prev];
+                                    u[idx] = { ...u[idx], jumlah: val };
+                                    return u;
+                                  });
+                                }}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition font-bold"
+                              />
+                            </div>
+                          </div>
+                        </div>
                       );
                     })}
-                  </select>
+                  </div>
                 </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                      Pilih Barang / Alat *
+                    </label>
+                    <select
+                      id="form-pinjam-barang-id"
+                      value={formBarangId}
+                      onChange={(e) => setFormBarangId(parseInt(e.target.value, 10))}
+                      disabled={modalMode === 'edit'}
+                      className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition disabled:bg-slate-50 disabled:text-slate-400"
+                    >
+                      <option value={0} disabled>-- Pilih Barang --</option>
+                      {items.map(i => (
+                        <option key={i.id} value={i.id}>
+                          {i.nama} ({i.kode}) - Stok: {i.stok_tersedia} Unit
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
-                    Jumlah Unit *
-                  </label>
-                  <input
-                    id="form-pinjam-jumlah"
-                    type="number"
-                    min="1"
-                    value={formJumlah}
-                    onChange={(e) => setFormJumlah(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition font-bold"
-                  />
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                      Jumlah Unit *
+                    </label>
+                    <input
+                      id="form-pinjam-jumlah"
+                      type="number"
+                      min="1"
+                      value={formJumlah}
+                      onChange={(e) => setFormJumlah(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      className="w-full px-3 py-2 border border-slate-200 focus:border-blue-500 rounded-xl text-xs outline-none transition font-bold"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Tanggal & Jam Pinjam / Kembali */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
