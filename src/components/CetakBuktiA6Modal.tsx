@@ -14,13 +14,14 @@ export function buildBookingWhatsAppText(borrowsInput: Peminjaman | Peminjaman[]
   const borrows = Array.isArray(borrowsInput) ? borrowsInput : (borrowsInput ? [borrowsInput] : []);
   if (borrows.length === 0) return '';
   
-  const first = borrows[0];
+  const sorted = [...borrows].sort((a, b) => a.id - b.id);
+  const first = sorted[0];
   const tglMulai = `${first.tanggal_pinjam}${first.jam_mulai ? ', Jam ' + first.jam_mulai : ''}`;
   const tglSelesai = `${first.tanggal_kembali}${first.jam_selesai ? ', Jam ' + first.jam_selesai : ''}`;
   
-  const itemsText = borrows.map((b, i) => `${i + 1}. *${b.barang_nama || 'Alat'}* (${b.barang_kode || '-'}) - *${b.jumlah} Unit*`).join('\n');
-  const totalUnits = borrows.reduce((acc, curr) => acc + curr.jumlah, 0);
-  const trxIds = borrows.map(b => `TRX-${b.id.toString().padStart(4, '0')}`).join(', ');
+  const itemsText = sorted.map((b, i) => `${i + 1}. *${b.barang_nama || 'Alat'}* (${b.barang_kode || '-'}) - *${b.jumlah} Unit*`).join('\n');
+  const totalUnits = sorted.reduce((acc, curr) => acc + curr.jumlah, 0);
+  const trxId = `TRX-${first.id.toString().padStart(4, '0')}`;
 
   return `*FORMAT BOOKING SEWA KAMERA / ALAT*
 *E-INVENTARIS SMA AL MUNAWWARIYYAH*
@@ -39,26 +40,28 @@ ${itemsText}
 *Keperluan Acara:* ${first.keperluan_acara || first.catatan || '-'}
 *Status:* ${first.status.toUpperCase()}
 ----------------------------------------
-*ID Transaksi:* ${trxIds}
+*ID Transaksi:* ${trxId}
 *Waktu Pengajuan:* ${first.created_at ? new Date(first.created_at).toLocaleString('id-ID') : new Date().toLocaleString('id-ID')}`;
 }
 
 export default function CetakBuktiA6Modal({ borrow, borrowData, borrows, isOpen, onClose }: CetakBuktiA6ModalProps) {
   const [copied, setCopied] = useState(false);
   
-  // Normalize items list
-  let itemList: Peminjaman[] = [];
+  // Normalize items list & sort by ID ascending
+  let rawList: Peminjaman[] = [];
   if (borrows && borrows.length > 0) {
-    itemList = borrows;
+    rawList = borrows;
   } else if (borrow) {
-    itemList = [borrow];
+    rawList = [borrow];
   } else if (borrowData) {
-    itemList = [borrowData];
+    rawList = [borrowData];
   }
 
-  if (!isOpen || itemList.length === 0) return null;
+  if (!isOpen || rawList.length === 0) return null;
 
+  const itemList = [...rawList].sort((a, b) => a.id - b.id);
   const activeBorrow = itemList[0];
+  const trxIdDisplay = `TRX-${activeBorrow.id.toString().padStart(4, '0')}`;
 
   const handlePrint = () => {
     window.print();
@@ -144,8 +147,10 @@ export default function CetakBuktiA6Modal({ borrow, borrowData, borrows, isOpen,
         {/* Modal Toolbar (Screen Only) */}
         <div className="p-3 bg-blue-50 border-b border-blue-100 flex flex-wrap items-center justify-between gap-2 text-xs no-print">
           <span className="text-blue-800 font-medium flex items-center gap-1.5">
-            <FileText className="w-4 h-4 text-blue-600" />
-            <span>ID Transaksi: TRX-{activeBorrow.id.toString().padStart(4, '0')}</span>
+            <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+            <span className="font-semibold">
+              ID Transaksi: {trxIdDisplay}
+            </span>
           </span>
 
           <div className="flex items-center gap-2">
@@ -179,7 +184,7 @@ export default function CetakBuktiA6Modal({ borrow, borrowData, borrows, isOpen,
             <div>
               <div className="text-center border-b-2 border-slate-900 pb-2 mb-2">
                 <h4 className="font-extrabold text-[13px] tracking-wider text-slate-900 uppercase">SMA AL MUNAWWARIYYAH</h4>
-                <p className="text-[10px] font-bold text-slate-700 tracking-tight uppercase">E-INVENTARIS & SEWA ALAT MULTIMEDIA</p>
+                <p className="text-[10px] font-bold text-slate-700 tracking-tight uppercase">E-INVENTARIS & SEWA ALAT</p>
                 <p className="text-[8px] text-slate-500">Jl. Raya Sudimoro No. 9, Bululawang, Malang, Jawa Timur</p>
               </div>
 
@@ -187,10 +192,8 @@ export default function CetakBuktiA6Modal({ borrow, borrowData, borrows, isOpen,
               <div className="flex items-center justify-between mb-2">
                 <div>
                   <span className="font-black text-[11px] text-slate-900 tracking-tight block">BUKTI SEWA / PEMINJAMAN</span>
-                  <span className="text-[9px] text-slate-500 font-mono">
-                    {itemList.length === 1 
-                      ? `TRX-${activeBorrow.id.toString().padStart(4, '0')}`
-                      : `${itemList.length} TRANSAKSI (${itemList.map(i => `TRX-${i.id.toString().padStart(4, '0')}`).join(', ')})`}
+                  <span className="text-[9.5px] text-slate-600 font-mono font-bold">
+                    ID: {trxIdDisplay}
                   </span>
                 </div>
                 <div className="px-2 py-0.5 border border-slate-900 font-black text-[9px] uppercase tracking-wider rounded">
@@ -215,9 +218,9 @@ export default function CetakBuktiA6Modal({ borrow, borrowData, borrows, isOpen,
                     <span className="text-slate-500 font-medium">WhatsApp / HP:</span>
                     <span className="font-semibold text-slate-800">{activeBorrow.kontak_peminjam}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Alamat / Shareloc:</span>
-                    <span className="font-semibold text-slate-800 text-right max-w-[160px] truncate">{activeBorrow.alamat_domisili || '-'}</span>
+                  <div className="flex justify-between items-start gap-2">
+                    <span className="text-slate-500 font-medium shrink-0">Alamat / Shareloc:</span>
+                    <span className="font-semibold text-slate-800 text-right leading-tight">{activeBorrow.alamat_domisili || '-'}</span>
                   </div>
                 </div>
 
@@ -227,9 +230,9 @@ export default function CetakBuktiA6Modal({ borrow, borrowData, borrows, isOpen,
                     Rincian Alat Disewa ({itemList.length} Jenis, Total {itemList.reduce((a, b) => a + b.jumlah, 0)} Unit):
                   </span>
                   {itemList.map((item, idx) => (
-                    <div key={item.id || idx} className="flex justify-between items-center text-[9.5px]">
-                      <span className="font-bold text-blue-900 truncate max-w-[190px]">
-                        {itemList.length > 1 ? `${idx + 1}. ` : ''}{item.barang_nama || 'Alat'} <span className="font-normal text-slate-500">({item.barang_kode || '-'})</span>
+                    <div key={item.id || idx} className="flex justify-between items-start gap-2 text-[9.5px]">
+                      <span className="font-bold text-blue-900 leading-snug">
+                        {itemList.length > 1 ? `${idx + 1}. ` : ''}{item.barang_nama || 'Alat'} <span className="font-normal text-slate-500 font-mono">({item.barang_kode || '-'})</span>
                       </span>
                       <span className="font-bold text-slate-800 shrink-0">{item.jumlah} Unit</span>
                     </div>

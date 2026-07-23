@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Search, Edit2, Trash2, Filter, AlertCircle, Calendar, User as UserIcon, Phone, FileText, CheckCircle, RefreshCw, X, Printer, Share2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { Peminjaman, Barang, User } from '../types.js';
@@ -28,7 +28,7 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
   const [selectedBorrow, setSelectedBorrow] = useState<Peminjaman | null>(null);
 
   // Print A6 Receipt State
-  const [printBorrowItem, setPrintBorrowItem] = useState<Peminjaman | null>(null);
+  const [printBorrowItems, setPrintBorrowItems] = useState<Peminjaman[]>([]);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   // Form State
@@ -270,6 +270,27 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
     }
   };
 
+  // Handle Cetak Bukti (Groups all items for the same borrower session if more than 1)
+  const handlePrintBukti = (b: Peminjaman) => {
+    const nameClean = (b.nama_peminjam || '').trim().toLowerCase();
+    const phoneClean = (b.kontak_peminjam || '').trim();
+    
+    // Find all matching items belonging to the same borrower & date session
+    const matchingGroup = borrows.filter(item => {
+      const iName = (item.nama_peminjam || '').trim().toLowerCase();
+      const iPhone = (item.kontak_peminjam || '').trim();
+      return (
+        iName === nameClean &&
+        iPhone === phoneClean &&
+        item.tanggal_pinjam === b.tanggal_pinjam &&
+        item.tanggal_kembali === b.tanggal_kembali
+      );
+    });
+
+    setPrintBorrowItems(matchingGroup.length > 0 ? matchingGroup : [b]);
+    setIsPrintModalOpen(true);
+  };
+
   // Filter lists
   const filteredBorrows = borrows.filter(b => {
     const matchesSearch =
@@ -282,6 +303,106 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
 
     return matchesSearch && matchesStatus;
   });
+
+  // Grouping borrows by borrower name, contact, borrow date & return date
+  interface BorrowGroup {
+    groupKey: string;
+    nama_peminjam: string;
+    kontak_peminjam: string;
+    akun_medsos: string;
+    alamat_domisili: string;
+    tanggal_pinjam: string;
+    tanggal_kembali: string;
+    jam_mulai: string;
+    jam_selesai: string;
+    jaminan: string;
+    keperluan_acara: string;
+    catatan: string;
+    status: string;
+    items: Peminjaman[];
+  }
+
+  const groupedBorrows: BorrowGroup[] = useMemo(() => {
+    const groupsMap = new Map<string, BorrowGroup>();
+
+    for (const b of filteredBorrows) {
+      const nameClean = (b.nama_peminjam || '').trim().toLowerCase();
+      const phoneClean = (b.kontak_peminjam || '').trim();
+      const key = `${nameClean}_${phoneClean}_${b.tanggal_pinjam}_${b.tanggal_kembali}`;
+
+      if (!groupsMap.has(key)) {
+        groupsMap.set(key, {
+          groupKey: key,
+          nama_peminjam: b.nama_peminjam,
+          kontak_peminjam: b.kontak_peminjam,
+          akun_medsos: b.akun_medsos || '',
+          alamat_domisili: b.alamat_domisili || '',
+          tanggal_pinjam: b.tanggal_pinjam,
+          tanggal_kembali: b.tanggal_kembali,
+          jam_mulai: b.jam_mulai || '',
+          jam_selesai: b.jam_selesai || '',
+          jaminan: b.jaminan || '',
+          keperluan_acara: b.keperluan_acara || '',
+          catatan: b.catatan || '',
+          status: b.status,
+          items: [b]
+        });
+      } else {
+        const group = groupsMap.get(key)!;
+        group.items.push(b);
+        const statuses = group.items.map(i => i.status);
+        if (statuses.every(s => s === 'Dikembalikan')) {
+          group.status = 'Dikembalikan';
+        } else if (statuses.includes('Terlambat')) {
+          group.status = 'Terlambat';
+        } else if (statuses.includes('Dipinjam')) {
+          group.status = 'Dipinjam';
+        } else {
+          group.status = statuses[0];
+        }
+      }
+    }
+
+    return Array.from(groupsMap.values());
+  }, [filteredBorrows]);
+
+  const handleQuickReturnGroup = async (group: BorrowGroup) => {
+    const activeItems = group.items.filter(i => i.status !== 'Dikembalikan');
+    if (activeItems.length === 0) return;
+
+    if (!confirm(`Apakah Anda yakin ingin memproses pengembalian seluruh barang (${activeItems.length} barang) untuk ${group.nama_peminjam}?`)) {
+      return;
+    }
+    try {
+      for (const item of activeItems) {
+        await api.updatePeminjaman(item.id, { status: 'Dikembalikan' });
+      }
+      loadData();
+      if (onRefreshStatsTrigger) onRefreshStatsTrigger();
+    } catch (err: any) {
+      alert(err.message || 'Gagal memperbarui status pengembalian.');
+    }
+  };
+
+  const handleDeleteGroup = async (group: BorrowGroup) => {
+    if (!confirm(`Apakah Anda yakin ingin menghapus seluruh log transaksi peminjaman (${group.items.length} barang) untuk ${group.nama_peminjam}?`)) {
+      return;
+    }
+    try {
+      for (const item of group.items) {
+        await api.deletePeminjaman(item.id);
+      }
+      loadData();
+      if (onRefreshStatsTrigger) onRefreshStatsTrigger();
+    } catch (err: any) {
+      alert(err.message || 'Gagal menghapus transaksi.');
+    }
+  };
+
+  const handlePrintBuktiGroup = (group: BorrowGroup) => {
+    setPrintBorrowItems(group.items);
+    setIsPrintModalOpen(true);
+  };
 
   // Export headers configuration
   const exportColumns = [
@@ -378,7 +499,7 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
           <AlertCircle className="w-5 h-5 shrink-0 text-red-500" />
           <span>{error}</span>
         </div>
-      ) : filteredBorrows.length === 0 ? (
+      ) : groupedBorrows.length === 0 ? (
         <div className="text-center py-16 bg-white border border-slate-200 rounded-2xl shadow-sm text-slate-400 flex flex-col items-center gap-3">
           <Calendar className="w-12 h-12 text-slate-300" />
           <div>
@@ -394,7 +515,7 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-semibold uppercase tracking-wider">
                   <th className="px-6 py-4">Peminjam</th>
-                  <th className="px-6 py-4">Barang</th>
+                  <th className="px-6 py-4">Barang Dipinjam</th>
                   <th className="px-6 py-4">Jumlah</th>
                   <th className="px-6 py-4">Tanggal Pinjam</th>
                   <th className="px-6 py-4">Tenggat Kembali</th>
@@ -404,76 +525,83 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200/60 text-sm text-slate-700">
-                {filteredBorrows.map(b => (
-                  <tr key={b.id} className="hover:bg-slate-50/50 transition duration-150">
+                {groupedBorrows.map(g => (
+                  <tr key={g.groupKey} className="hover:bg-slate-50/50 transition duration-150">
                     <td className="px-6 py-4">
                       <div>
-                        <div className="font-bold text-slate-900">{b.nama_peminjam}</div>
-                        <div className="text-xs text-slate-400 font-medium font-mono mt-0.5">{b.kontak_peminjam}</div>
+                        <div className="font-bold text-slate-900">{g.nama_peminjam}</div>
+                        <div className="text-xs text-slate-400 font-medium font-mono mt-0.5">{g.kontak_peminjam}</div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div>
-                        <div className="font-semibold text-slate-900">{b.barang_nama}</div>
-                        <div className="text-[11px] font-mono font-bold text-blue-500 mt-0.5">{b.barang_kode}</div>
+                      <div className="space-y-1">
+                        {g.items.map((item, idx) => (
+                          <div key={item.id} className="text-xs flex items-center gap-1.5">
+                            {g.items.length > 1 && <span className="text-slate-400 font-semibold">{idx + 1}.</span>}
+                            <span className="font-semibold text-slate-900">{item.barang_nama}</span>
+                            <span className="text-[11px] font-mono font-bold text-blue-500">({item.barang_kode})</span>
+                            {g.items.length > 1 && <span className="font-mono text-slate-600 font-bold text-[11px]">[{item.jumlah} Unit]</span>}
+                          </div>
+                        ))}
                       </div>
                     </td>
-                    <td className="px-6 py-4 font-bold font-mono text-slate-900">{b.jumlah} Unit</td>
-                    <td className="px-6 py-4 text-slate-500 font-mono text-xs">{b.tanggal_pinjam}</td>
-                    <td className="px-6 py-4 text-slate-500 font-mono text-xs">{b.tanggal_kembali}</td>
+                    <td className="px-6 py-4 font-bold font-mono text-slate-900">
+                      {g.items.reduce((acc, curr) => acc + curr.jumlah, 0)} Unit
+                      {g.items.length > 1 && (
+                        <span className="block text-[11px] font-normal text-slate-400 font-sans">
+                          ({g.items.length} jenis)
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-slate-500 font-mono text-xs">{g.tanggal_pinjam}</td>
+                    <td className="px-6 py-4 text-slate-500 font-mono text-xs">{g.tanggal_kembali}</td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold leading-none ${
-                        b.status === 'Booking'
+                        g.status === 'Booking'
                           ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                          : b.status === 'Dipinjam'
+                          : g.status === 'Dipinjam'
                           ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                          : b.status === 'Dikembalikan'
+                          : g.status === 'Dikembalikan'
                           ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                           : 'bg-rose-50 text-rose-700 border border-rose-200'
                       }`}>
-                        {b.status}
+                        {g.status}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-slate-400 max-w-[150px] truncate" title={b.catatan}>
-                      {b.catatan || '-'}
+                    <td className="px-6 py-4 text-slate-400 max-w-[150px] truncate" title={g.catatan}>
+                      {g.catatan || '-'}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <button
-                          onClick={() => {
-                            setPrintBorrowItem(b);
-                            setIsPrintModalOpen(true);
-                          }}
-                          className="p-1.5 border border-slate-200 hover:bg-slate-100 text-slate-700 hover:text-slate-900 rounded-lg transition"
+                          onClick={() => handlePrintBuktiGroup(g)}
+                          className="p-1.5 border border-slate-200 hover:bg-slate-100 text-slate-700 hover:text-slate-900 rounded-lg transition cursor-pointer"
                           title="Cetak Bukti A6"
                         >
                           <Printer className="w-4 h-4 text-blue-600" />
                         </button>
 
-                        {(b.status === 'Booking' || b.status === 'Dipinjam' || b.status === 'Terlambat') && (
+                        {(g.status === 'Booking' || g.status === 'Dipinjam' || g.status === 'Terlambat') && (
                           <button
-                            id={`btn-kembali-cepat-${b.id}`}
-                            onClick={() => handleQuickReturn(b)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold transition"
-                            title="Proses Pengembalian Instan"
+                            onClick={() => handleQuickReturnGroup(g)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold transition cursor-pointer"
+                            title="Proses Pengembalian Seluruh Barang"
                           >
                             <CheckCircle className="w-3.5 h-3.5" />
                             <span>Kembalikan</span>
                           </button>
                         )}
                         <button
-                          id={`btn-edit-peminjaman-${b.id}`}
-                          onClick={() => openEditModal(b)}
-                          className="p-1.5 border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-lg transition"
+                          onClick={() => openEditModal(g.items[0])}
+                          className="p-1.5 border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-lg transition cursor-pointer"
                           title="Ubah Rincian"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         {user.role === 'Admin' && (
                           <button
-                            id={`btn-hapus-peminjaman-${b.id}`}
-                            onClick={() => handleDelete(b.id)}
-                            className="p-1.5 border border-rose-200 hover:bg-rose-50 text-rose-500 hover:text-rose-700 rounded-lg transition"
+                            onClick={() => handleDeleteGroup(g)}
+                            className="p-1.5 border border-rose-200 hover:bg-rose-50 text-rose-500 hover:text-rose-700 rounded-lg transition cursor-pointer"
                             title="Hapus Log"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -489,59 +617,69 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
 
           {/* Mobile & Tablet Card Layout */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:hidden gap-4">
-            {filteredBorrows.map(b => (
-              <div key={b.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
+            {groupedBorrows.map(g => (
+              <div key={g.groupKey} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
                 {/* Header card */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <h4 className="font-bold text-slate-900 text-md truncate">{b.nama_peminjam}</h4>
-                    <span className="text-xs text-slate-400 font-mono font-medium block mt-0.5">{b.kontak_peminjam}</span>
+                    <h4 className="font-bold text-slate-900 text-md truncate">{g.nama_peminjam}</h4>
+                    <span className="text-xs text-slate-400 font-mono font-medium block mt-0.5">{g.kontak_peminjam}</span>
                   </div>
                   <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-bold ${
-                    b.status === 'Dipinjam'
+                    g.status === 'Dipinjam'
                       ? 'bg-amber-50 text-amber-700 border border-amber-100'
-                      : b.status === 'Dikembalikan'
+                      : g.status === 'Dikembalikan'
                       ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                      : g.status === 'Booking'
+                      ? 'bg-purple-50 text-purple-700 border border-purple-100'
                       : 'bg-rose-50 text-rose-700 border border-rose-100'
                   }`}>
-                    {b.status}
+                    {g.status}
                   </span>
                 </div>
 
                 {/* Details list */}
-                <div className="py-3 px-4 bg-slate-50/50 rounded-xl border border-slate-100/50 space-y-1.5 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Barang Dipinjam:</span>
-                    <span className="font-bold text-slate-800">{b.barang_nama} <span className="font-mono text-[10px] text-blue-500">({b.barang_kode})</span></span>
+                <div className="py-3 px-4 bg-slate-50/50 rounded-xl border border-slate-100/50 space-y-2 text-xs">
+                  <div className="text-[11px] font-bold text-slate-700 border-b border-slate-200/60 pb-1.5 flex justify-between">
+                    <span>Barang Dipinjam ({g.items.length} Jenis)</span>
+                    <span className="text-slate-900 font-mono">Total {g.items.reduce((a, b) => a + b.jumlah, 0)} Unit</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Kuantitas:</span>
-                    <span className="font-bold text-slate-900 font-mono">{b.jumlah} Unit</span>
+
+                  <div className="space-y-1.5 py-0.5">
+                    {g.items.map((item, idx) => (
+                      <div key={item.id} className="flex justify-between items-start gap-2 text-xs">
+                        <span className="font-bold text-slate-800 leading-snug">
+                          {g.items.length > 1 ? `${idx + 1}. ` : ''}{item.barang_nama}{' '}
+                          <span className="font-mono text-[10px] text-blue-500 font-medium">({item.barang_kode})</span>
+                        </span>
+                        <span className="font-bold font-mono text-slate-900 shrink-0">{item.jumlah} Unit</span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Tanggal Pinjam:</span>
-                    <span className="font-mono text-slate-600">{b.tanggal_pinjam}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Tenggat Kembali:</span>
-                    <span className="font-mono text-slate-600">{b.tanggal_kembali}</span>
+
+                  <div className="pt-2 border-t border-slate-200/60 space-y-1 text-slate-500 text-xs">
+                    <div className="flex justify-between">
+                      <span>Tanggal Pinjam:</span>
+                      <span className="font-mono text-slate-700">{g.tanggal_pinjam}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Tenggat Kembali:</span>
+                      <span className="font-mono text-slate-700">{g.tanggal_kembali}</span>
+                    </div>
                   </div>
                 </div>
 
-                {b.catatan && (
+                {g.catatan && (
                   <p className="text-xs text-slate-500 italic flex items-start gap-1">
                     <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                    <span>"{b.catatan}"</span>
+                    <span>"{g.catatan}"</span>
                   </p>
                 )}
 
                 {/* Card footer actions */}
                 <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100">
                   <button
-                    onClick={() => {
-                      setPrintBorrowItem(b);
-                      setIsPrintModalOpen(true);
-                    }}
+                    onClick={() => handlePrintBuktiGroup(g)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition cursor-pointer"
                   >
                     <Printer className="w-3.5 h-3.5" />
@@ -549,9 +687,9 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
                   </button>
 
                   <div className="flex items-center gap-1.5">
-                    {(b.status === 'Booking' || b.status === 'Dipinjam' || b.status === 'Terlambat') && (
+                    {(g.status === 'Booking' || g.status === 'Dipinjam' || g.status === 'Terlambat') && (
                       <button
-                        onClick={() => handleQuickReturn(b)}
+                        onClick={() => handleQuickReturnGroup(g)}
                         className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-500 rounded-xl text-xs font-semibold transition cursor-pointer"
                       >
                         <CheckCircle className="w-3.5 h-3.5" />
@@ -559,7 +697,7 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
                       </button>
                     )}
                     <button
-                      onClick={() => openEditModal(b)}
+                      onClick={() => openEditModal(g.items[0])}
                       className="p-1.5 border border-slate-200 hover:bg-slate-50 rounded-xl text-slate-600 cursor-pointer"
                       title="Ubah Rincian"
                     >
@@ -567,7 +705,7 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
                     </button>
                     {user.role === 'Admin' && (
                       <button
-                        onClick={() => handleDelete(b.id)}
+                        onClick={() => handleDeleteGroup(g)}
                         className="p-1.5 border border-rose-100 hover:bg-rose-50 rounded-xl text-rose-500 cursor-pointer"
                         title="Hapus Log"
                       >
@@ -939,7 +1077,7 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
       <CetakBuktiA6Modal
         isOpen={isPrintModalOpen}
         onClose={() => setIsPrintModalOpen(false)}
-        borrowData={printBorrowItem}
+        borrows={printBorrowItems}
       />
     </div>
   );
