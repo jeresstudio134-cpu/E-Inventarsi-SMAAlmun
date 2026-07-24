@@ -3,6 +3,7 @@ import { Camera, Calendar, Clock, User, Phone, MapPin, Shield, FileText, CheckCi
 import { Barang, Peminjaman } from '../types.js';
 import { api } from '../lib/api.js';
 import CetakBuktiA6Modal, { buildBookingWhatsAppText } from './CetakBuktiA6Modal.js';
+import { groupAndNumberBorrows } from '../utils/trxHelper.js';
 
 interface BookingModalProps {
   isOpen: boolean;
@@ -160,6 +161,21 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
         createdList.push(result);
       }
 
+      // Compute sequential TRX code for the new booking group
+      try {
+        const allBorrows = await api.getPeminjaman();
+        const groups = groupAndNumberBorrows(allBorrows);
+        const match = groups.find(g => g.items.some(i => i.id === createdList[0].id));
+        if (match) {
+          createdList.forEach(item => {
+            item.trx_code = match.trxCode;
+            item.trx_number = match.trxNumber;
+          });
+        }
+      } catch (e) {
+        // Fallback if public user cannot query all borrows
+      }
+
       setCreatedBookings(createdList);
       if (onSuccessTrigger) onSuccessTrigger();
     } catch (err: any) {
@@ -171,7 +187,7 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
 
   const handleCopyWA = () => {
     if (createdBookings.length === 0) return;
-    const text = buildBookingWhatsAppText(createdBookings);
+    const text = buildBookingWhatsAppText(createdBookings, createdBookings[0]?.trx_code);
     navigator.clipboard.writeText(text);
     setCopiedWA(true);
     setTimeout(() => setCopiedWA(false), 2000);
@@ -213,14 +229,14 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
                   <div>
                     <h4 className="font-bold text-base text-emerald-950">Permohonan Booking Sewa Berhasil Terkirim!</h4>
                     <p className="text-xs text-emerald-800 mt-1">
-                      Data booking ({createdBookings.length} barang) telah tersimpan dengan ID Transaksi <span className="font-mono font-bold">TRX-{Math.min(...createdBookings.map(b => b.id)).toString().padStart(4, '0')}</span>. Silakan simpan format pesan di bawah ini atau cetak bukti sewa A6 untuk diserahkan ke petugas lab.
+                      Data booking ({createdBookings.length} barang) telah tersimpan dengan ID Transaksi <span className="font-mono font-bold">{createdBookings[0]?.trx_code || `TRX-${Math.min(...createdBookings.map(b => b.id)).toString().padStart(4, '0')}`}</span>. Silakan simpan format pesan di bawah ini atau cetak bukti sewa A6 untuk diserahkan ke petugas lab.
                     </p>
                   </div>
                 </div>
 
                 {/* Text Summary Format Preview */}
                 <div className="bg-slate-900 text-slate-100 p-4 rounded-xl text-xs font-mono whitespace-pre-wrap leading-relaxed shadow-inner border border-slate-800">
-                  {buildBookingWhatsAppText(createdBookings)}
+                  {buildBookingWhatsAppText(createdBookings, createdBookings[0]?.trx_code)}
                 </div>
 
                 {/* Actions */}
@@ -548,6 +564,7 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
       {createdBookings.length > 0 && (
         <CetakBuktiA6Modal
           borrows={createdBookings}
+          trxCode={createdBookings[0]?.trx_code}
           isOpen={isA6ModalOpen}
           onClose={() => setIsA6ModalOpen(false)}
         />

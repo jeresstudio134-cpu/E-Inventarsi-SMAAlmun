@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { Peminjaman, Barang, User } from '../types.js';
 import ExportButton from './ExportButton.js';
 import CetakBuktiA6Modal from './CetakBuktiA6Modal.js';
+import { groupAndNumberBorrows, BorrowGroup } from '../utils/trxHelper.js';
 
 interface PeminjamanManagementProps {
   user: User;
@@ -291,83 +292,32 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
     setIsPrintModalOpen(true);
   };
 
-  // Filter lists
-  const filteredBorrows = borrows.filter(b => {
-    const trxFormatted = `trx-${b.id.toString().padStart(4, '0')}`;
-    const matchesSearch =
-      b.nama_peminjam.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (b.barang_nama && b.barang_nama.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (b.barang_kode && b.barang_kode.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      b.kontak_peminjam.includes(searchQuery) ||
-      trxFormatted.includes(searchQuery.toLowerCase()) ||
-      b.id.toString().includes(searchQuery);
+  // 1. Group ALL borrows into distinct transactions and assign sequential TRX IDs (TRX-0001, TRX-0002, ...)
+  const allGroupedBorrows = useMemo(() => {
+    return groupAndNumberBorrows(borrows);
+  }, [borrows]);
 
-    const matchesStatus = selectedStatus === 'All' || b.status === selectedStatus;
+  // 2. Filter grouped transactions based on search and status
+  const groupedBorrows = useMemo(() => {
+    return allGroupedBorrows.filter(g => {
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch =
+        !q ||
+        g.nama_peminjam.toLowerCase().includes(q) ||
+        g.kontak_peminjam.includes(q) ||
+        g.trxCode.toLowerCase().includes(q) ||
+        g.trxNumber.toString().includes(q) ||
+        g.items.some(i =>
+          (i.barang_nama && i.barang_nama.toLowerCase().includes(q)) ||
+          (i.barang_kode && i.barang_kode.toLowerCase().includes(q)) ||
+          i.id.toString().includes(q)
+        );
 
-    return matchesSearch && matchesStatus;
-  });
+      const matchesStatus = selectedStatus === 'All' || g.status === selectedStatus;
 
-  // Grouping borrows by borrower name, contact, borrow date & return date
-  interface BorrowGroup {
-    groupKey: string;
-    nama_peminjam: string;
-    kontak_peminjam: string;
-    akun_medsos: string;
-    alamat_domisili: string;
-    tanggal_pinjam: string;
-    tanggal_kembali: string;
-    jam_mulai: string;
-    jam_selesai: string;
-    jaminan: string;
-    keperluan_acara: string;
-    catatan: string;
-    status: string;
-    items: Peminjaman[];
-  }
-
-  const groupedBorrows: BorrowGroup[] = useMemo(() => {
-    const groupsMap = new Map<string, BorrowGroup>();
-
-    for (const b of filteredBorrows) {
-      const nameClean = (b.nama_peminjam || '').trim().toLowerCase();
-      const phoneClean = (b.kontak_peminjam || '').trim();
-      const key = `${nameClean}_${phoneClean}_${b.tanggal_pinjam}_${b.tanggal_kembali}`;
-
-      if (!groupsMap.has(key)) {
-        groupsMap.set(key, {
-          groupKey: key,
-          nama_peminjam: b.nama_peminjam,
-          kontak_peminjam: b.kontak_peminjam,
-          akun_medsos: b.akun_medsos || '',
-          alamat_domisili: b.alamat_domisili || '',
-          tanggal_pinjam: b.tanggal_pinjam,
-          tanggal_kembali: b.tanggal_kembali,
-          jam_mulai: b.jam_mulai || '',
-          jam_selesai: b.jam_selesai || '',
-          jaminan: b.jaminan || '',
-          keperluan_acara: b.keperluan_acara || '',
-          catatan: b.catatan || '',
-          status: b.status,
-          items: [b]
-        });
-      } else {
-        const group = groupsMap.get(key)!;
-        group.items.push(b);
-        const statuses = group.items.map(i => i.status);
-        if (statuses.every(s => s === 'Dikembalikan')) {
-          group.status = 'Dikembalikan';
-        } else if (statuses.includes('Terlambat')) {
-          group.status = 'Terlambat';
-        } else if (statuses.includes('Dipinjam')) {
-          group.status = 'Dipinjam';
-        } else {
-          group.status = statuses[0];
-        }
-      }
-    }
-
-    return Array.from(groupsMap.values());
-  }, [filteredBorrows]);
+      return matchesSearch && matchesStatus;
+    });
+  }, [allGroupedBorrows, searchQuery, selectedStatus]);
 
   const handleQuickReturnGroup = async (group: BorrowGroup) => {
     const activeItems = group.items.filter(i => i.status !== 'Dikembalikan');
@@ -434,7 +384,7 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
         </div>
         <div className="flex items-center gap-3">
           <ExportButton
-            data={filteredBorrows}
+            data={borrows}
             columns={exportColumns}
             filename="Laporan_Peminjaman_Barang"
           />
@@ -530,12 +480,10 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
               </thead>
               <tbody className="divide-y divide-slate-200/60 text-sm text-slate-700">
                 {groupedBorrows.map(g => {
-                  const minId = Math.min(...g.items.map(i => i.id));
-                  const groupTrxId = `TRX-${minId.toString().padStart(4, '0')}`;
                   return (
                     <tr key={g.groupKey} className="hover:bg-slate-50/50 transition duration-150">
                       <td className="px-5 py-4 font-mono font-bold text-xs text-blue-600 whitespace-nowrap">
-                        {groupTrxId}
+                        {g.trxCode}
                       </td>
                       <td className="px-5 py-4">
                         <div>
@@ -629,15 +577,13 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
           {/* Mobile & Tablet Card Layout */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:hidden gap-4">
             {groupedBorrows.map(g => {
-              const minId = Math.min(...g.items.map(i => i.id));
-              const groupTrxId = `TRX-${minId.toString().padStart(4, '0')}`;
               return (
                 <div key={g.groupKey} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
                   {/* Header card */}
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <span className="inline-block text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 mb-1">
-                        {groupTrxId}
+                        {g.trxCode}
                       </span>
                       <h4 className="font-bold text-slate-900 text-md truncate">{g.nama_peminjam}</h4>
                       <span className="text-xs text-slate-400 font-mono font-medium block mt-0.5">{g.kontak_peminjam}</span>

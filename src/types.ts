@@ -37,6 +37,8 @@ export interface Peminjaman {
   keperluan_acara?: string;
   status: 'Booking' | 'Dipinjam' | 'Dikembalikan' | 'Terlambat' | 'Batal';
   catatan?: string;
+  trx_code?: string;
+  trx_number?: number;
   created_at?: string;
 }
 

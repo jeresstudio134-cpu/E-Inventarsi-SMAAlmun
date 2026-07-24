@@ -6,11 +6,12 @@ interface CetakBuktiA6ModalProps {
   borrow?: Peminjaman | null;
   borrowData?: Peminjaman | null;
   borrows?: Peminjaman[] | null;
+  trxCode?: string;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function buildBookingWhatsAppText(borrowsInput: Peminjaman | Peminjaman[]): string {
+export function buildBookingWhatsAppText(borrowsInput: Peminjaman | Peminjaman[], customTrxCode?: string): string {
   const borrows = Array.isArray(borrowsInput) ? borrowsInput : (borrowsInput ? [borrowsInput] : []);
   if (borrows.length === 0) return '';
   
@@ -21,7 +22,7 @@ export function buildBookingWhatsAppText(borrowsInput: Peminjaman | Peminjaman[]
   
   const itemsText = sorted.map((b, i) => `${i + 1}. *${b.barang_nama || 'Alat'}* (${b.barang_kode || '-'}) - *${b.jumlah} Unit*`).join('\n');
   const totalUnits = sorted.reduce((acc, curr) => acc + curr.jumlah, 0);
-  const trxId = `TRX-${first.id.toString().padStart(4, '0')}`;
+  const trxId = customTrxCode || first.trx_code || `TRX-${first.id.toString().padStart(4, '0')}`;
 
   return `*FORMAT BOOKING SEWA KAMERA / ALAT*
 *E-INVENTARIS SMA AL MUNAWWARIYYAH*
@@ -44,7 +45,7 @@ ${itemsText}
 *Waktu Pengajuan:* ${first.created_at ? new Date(first.created_at).toLocaleString('id-ID') : new Date().toLocaleString('id-ID')}`;
 }
 
-export default function CetakBuktiA6Modal({ borrow, borrowData, borrows, isOpen, onClose }: CetakBuktiA6ModalProps) {
+export default function CetakBuktiA6Modal({ borrow, borrowData, borrows, trxCode, isOpen, onClose }: CetakBuktiA6ModalProps) {
   const [copied, setCopied] = useState(false);
   
   // Normalize items list & sort by ID ascending
@@ -61,14 +62,14 @@ export default function CetakBuktiA6Modal({ borrow, borrowData, borrows, isOpen,
 
   const itemList = [...rawList].sort((a, b) => a.id - b.id);
   const activeBorrow = itemList[0];
-  const trxIdDisplay = `TRX-${activeBorrow.id.toString().padStart(4, '0')}`;
+  const trxIdDisplay = trxCode || activeBorrow.trx_code || `TRX-${activeBorrow.id.toString().padStart(4, '0')}`;
 
   const handlePrint = () => {
     window.print();
   };
 
   const handleCopyWA = () => {
-    const text = buildBookingWhatsAppText(itemList);
+    const text = buildBookingWhatsAppText(itemList, trxIdDisplay);
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
