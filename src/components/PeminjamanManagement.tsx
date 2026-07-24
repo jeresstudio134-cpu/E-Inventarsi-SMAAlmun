@@ -293,11 +293,14 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
 
   // Filter lists
   const filteredBorrows = borrows.filter(b => {
+    const trxFormatted = `trx-${b.id.toString().padStart(4, '0')}`;
     const matchesSearch =
       b.nama_peminjam.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (b.barang_nama && b.barang_nama.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (b.barang_kode && b.barang_kode.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      b.kontak_peminjam.includes(searchQuery);
+      b.kontak_peminjam.includes(searchQuery) ||
+      trxFormatted.includes(searchQuery.toLowerCase()) ||
+      b.id.toString().includes(searchQuery);
 
     const matchesStatus = selectedStatus === 'All' || b.status === selectedStatus;
 
@@ -514,117 +517,131 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-semibold uppercase tracking-wider">
-                  <th className="px-6 py-4">Peminjam</th>
-                  <th className="px-6 py-4">Barang Dipinjam</th>
-                  <th className="px-6 py-4">Jumlah</th>
-                  <th className="px-6 py-4">Tanggal Pinjam</th>
-                  <th className="px-6 py-4">Tenggat Kembali</th>
-                  <th className="px-6 py-4">Status</th>
-                  <th className="px-6 py-4">Keterangan</th>
-                  <th className="px-6 py-4 text-right">Aksi</th>
+                  <th className="px-5 py-4">ID Transaksi</th>
+                  <th className="px-5 py-4">Peminjam</th>
+                  <th className="px-5 py-4">Barang Dipinjam</th>
+                  <th className="px-5 py-4">Jumlah</th>
+                  <th className="px-5 py-4">Tanggal Pinjam</th>
+                  <th className="px-5 py-4">Tenggat Kembali</th>
+                  <th className="px-5 py-4">Status</th>
+                  <th className="px-5 py-4">Keterangan</th>
+                  <th className="px-5 py-4 text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200/60 text-sm text-slate-700">
-                {groupedBorrows.map(g => (
-                  <tr key={g.groupKey} className="hover:bg-slate-50/50 transition duration-150">
-                    <td className="px-6 py-4">
-                      <div>
-                        <div className="font-bold text-slate-900">{g.nama_peminjam}</div>
-                        <div className="text-xs text-slate-400 font-medium font-mono mt-0.5">{g.kontak_peminjam}</div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="space-y-1">
-                        {g.items.map((item, idx) => (
-                          <div key={item.id} className="text-xs flex items-center gap-1.5">
-                            {g.items.length > 1 && <span className="text-slate-400 font-semibold">{idx + 1}.</span>}
-                            <span className="font-semibold text-slate-900">{item.barang_nama}</span>
-                            <span className="text-[11px] font-mono font-bold text-blue-500">({item.barang_kode})</span>
-                            {g.items.length > 1 && <span className="font-mono text-slate-600 font-bold text-[11px]">[{item.jumlah} Unit]</span>}
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 font-bold font-mono text-slate-900">
-                      {g.items.reduce((acc, curr) => acc + curr.jumlah, 0)} Unit
-                      {g.items.length > 1 && (
-                        <span className="block text-[11px] font-normal text-slate-400 font-sans">
-                          ({g.items.length} jenis)
+                {groupedBorrows.map(g => {
+                  const minId = Math.min(...g.items.map(i => i.id));
+                  const groupTrxId = `TRX-${minId.toString().padStart(4, '0')}`;
+                  return (
+                    <tr key={g.groupKey} className="hover:bg-slate-50/50 transition duration-150">
+                      <td className="px-5 py-4 font-mono font-bold text-xs text-blue-600 whitespace-nowrap">
+                        {groupTrxId}
+                      </td>
+                      <td className="px-5 py-4">
+                        <div>
+                          <div className="font-bold text-slate-900">{g.nama_peminjam}</div>
+                          <div className="text-xs text-slate-400 font-medium font-mono mt-0.5">{g.kontak_peminjam}</div>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="space-y-1">
+                          {g.items.map((item, idx) => (
+                            <div key={item.id} className="text-xs flex items-center gap-1.5">
+                              {g.items.length > 1 && <span className="text-slate-400 font-semibold">{idx + 1}.</span>}
+                              <span className="font-semibold text-slate-900">{item.barang_nama}</span>
+                              <span className="text-[11px] font-mono font-bold text-blue-500">({item.barang_kode})</span>
+                              {g.items.length > 1 && <span className="font-mono text-slate-600 font-bold text-[11px]">[{item.jumlah} Unit]</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 font-bold font-mono text-slate-900">
+                        {g.items.reduce((acc, curr) => acc + curr.jumlah, 0)} Unit
+                        {g.items.length > 1 && (
+                          <span className="block text-[11px] font-normal text-slate-400 font-sans">
+                            ({g.items.length} jenis)
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 text-slate-500 font-mono text-xs">{g.tanggal_pinjam}</td>
+                      <td className="px-5 py-4 text-slate-500 font-mono text-xs">{g.tanggal_kembali}</td>
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold leading-none ${
+                          g.status === 'Booking'
+                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                            : g.status === 'Dipinjam'
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                            : g.status === 'Dikembalikan'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-rose-50 text-rose-700 border border-rose-200'
+                        }`}>
+                          {g.status}
                         </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-slate-500 font-mono text-xs">{g.tanggal_pinjam}</td>
-                    <td className="px-6 py-4 text-slate-500 font-mono text-xs">{g.tanggal_kembali}</td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold leading-none ${
-                        g.status === 'Booking'
-                          ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                          : g.status === 'Dipinjam'
-                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                          : g.status === 'Dikembalikan'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : 'bg-rose-50 text-rose-700 border border-rose-200'
-                      }`}>
-                        {g.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-slate-400 max-w-[150px] truncate" title={g.catatan}>
-                      {g.catatan || '-'}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => handlePrintBuktiGroup(g)}
-                          className="p-1.5 border border-slate-200 hover:bg-slate-100 text-slate-700 hover:text-slate-900 rounded-lg transition cursor-pointer"
-                          title="Cetak Bukti A6"
-                        >
-                          <Printer className="w-4 h-4 text-blue-600" />
-                        </button>
+                      </td>
+                      <td className="px-5 py-4 text-slate-400 max-w-[150px] truncate" title={g.catatan}>
+                        {g.catatan || '-'}
+                      </td>
+                      <td className="px-5 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handlePrintBuktiGroup(g)}
+                            className="p-1.5 border border-slate-200 hover:bg-slate-100 text-slate-700 hover:text-slate-900 rounded-lg transition cursor-pointer"
+                            title="Cetak Bukti A6"
+                          >
+                            <Printer className="w-4 h-4 text-blue-600" />
+                          </button>
 
-                        {(g.status === 'Booking' || g.status === 'Dipinjam' || g.status === 'Terlambat') && (
+                          {(g.status === 'Booking' || g.status === 'Dipinjam' || g.status === 'Terlambat') && (
+                            <button
+                              onClick={() => handleQuickReturnGroup(g)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold transition cursor-pointer"
+                              title="Proses Pengembalian Seluruh Barang"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              <span>Kembalikan</span>
+                            </button>
+                          )}
                           <button
-                            onClick={() => handleQuickReturnGroup(g)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold transition cursor-pointer"
-                            title="Proses Pengembalian Seluruh Barang"
+                            onClick={() => openEditModal(g.items[0])}
+                            className="p-1.5 border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-lg transition cursor-pointer"
+                            title="Ubah Rincian"
                           >
-                            <CheckCircle className="w-3.5 h-3.5" />
-                            <span>Kembalikan</span>
+                            <Edit2 className="w-4 h-4" />
                           </button>
-                        )}
-                        <button
-                          onClick={() => openEditModal(g.items[0])}
-                          className="p-1.5 border border-slate-200 hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-lg transition cursor-pointer"
-                          title="Ubah Rincian"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        {user.role === 'Admin' && (
-                          <button
-                            onClick={() => handleDeleteGroup(g)}
-                            className="p-1.5 border border-rose-200 hover:bg-rose-50 text-rose-500 hover:text-rose-700 rounded-lg transition cursor-pointer"
-                            title="Hapus Log"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          {user.role === 'Admin' && (
+                            <button
+                              onClick={() => handleDeleteGroup(g)}
+                              className="p-1.5 border border-rose-200 hover:bg-rose-50 text-rose-500 hover:text-rose-700 rounded-lg transition cursor-pointer"
+                              title="Hapus Log"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           {/* Mobile & Tablet Card Layout */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:hidden gap-4">
-            {groupedBorrows.map(g => (
-              <div key={g.groupKey} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
-                {/* Header card */}
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <h4 className="font-bold text-slate-900 text-md truncate">{g.nama_peminjam}</h4>
-                    <span className="text-xs text-slate-400 font-mono font-medium block mt-0.5">{g.kontak_peminjam}</span>
-                  </div>
+            {groupedBorrows.map(g => {
+              const minId = Math.min(...g.items.map(i => i.id));
+              const groupTrxId = `TRX-${minId.toString().padStart(4, '0')}`;
+              return (
+                <div key={g.groupKey} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
+                  {/* Header card */}
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <span className="inline-block text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 mb-1">
+                        {groupTrxId}
+                      </span>
+                      <h4 className="font-bold text-slate-900 text-md truncate">{g.nama_peminjam}</h4>
+                      <span className="text-xs text-slate-400 font-mono font-medium block mt-0.5">{g.kontak_peminjam}</span>
+                    </div>
                   <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-bold ${
                     g.status === 'Dipinjam'
                       ? 'bg-amber-50 text-amber-700 border border-amber-100'
@@ -715,7 +732,8 @@ export default function PeminjamanManagement({ user, onRefreshStatsTrigger, isOp
                   </div>
                 </div>
               </div>
-            ))}
+            );
+          })}
           </div>
         </>
       )}

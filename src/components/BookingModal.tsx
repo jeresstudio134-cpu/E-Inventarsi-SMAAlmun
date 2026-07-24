@@ -213,7 +213,7 @@ export default function BookingModal({ isOpen, onClose, items, selectedItem, onS
                   <div>
                     <h4 className="font-bold text-base text-emerald-950">Permohonan Booking Sewa Berhasil Terkirim!</h4>
                     <p className="text-xs text-emerald-800 mt-1">
-                      Data booking ({createdBookings.length} barang) telah tersimpan dengan ID Transaksi <span className="font-mono font-bold">{createdBookings.map(b => `TRX-${b.id.toString().padStart(4, '0')}`).join(', ')}</span>. Silakan simpan format pesan di bawah ini atau cetak bukti sewa A6 untuk diserahkan ke petugas lab.
+                      Data booking ({createdBookings.length} barang) telah tersimpan dengan ID Transaksi <span className="font-mono font-bold">TRX-{Math.min(...createdBookings.map(b => b.id)).toString().padStart(4, '0')}</span>. Silakan simpan format pesan di bawah ini atau cetak bukti sewa A6 untuk diserahkan ke petugas lab.
                     </p>
                   </div>
                 </div>
